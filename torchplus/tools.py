@@ -54,3 +54,14 @@ def torch_to_np_dtype(ttype):
         torch.uint8: np.dtype(np.uint8),
     }
     return type_map[ttype]
+
+def paddle_to_np_dtype(ttype):
+    type_map = {
+        paddle.float16: np.dtype(np.float16),
+        paddle.float32: np.dtype(np.float32),
+        paddle.float16: np.dtype(np.float64),
+        paddle.int32: np.dtype(np.int32),
+        paddle.int64: np.dtype(np.int64),
+        paddle.uint8: np.dtype(np.uint8),
+    }
+    return type_map[ttype]

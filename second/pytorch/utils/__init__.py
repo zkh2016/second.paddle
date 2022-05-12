@@ -1,11 +1,11 @@
 import time 
 import contextlib 
-import torch 
+import paddle 
 
 @contextlib.contextmanager
-def torch_timer(name=''):
-    torch.cuda.synchronize()
+def paddle_timer(name=''):
+    paddle.device.cuda.synchronize()
     t = time.time()
     yield
-    torch.cuda.synchronize()
+    paddle.device.cuda.synchronize()
     print(name, "time:", time.time() - t)

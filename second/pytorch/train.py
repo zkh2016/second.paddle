@@ -58,10 +58,14 @@ def example_convert_to_torch(example, dtype=torch.float32,
 def build_network(model_cfg, measure_time=False):
     voxel_generator = voxel_builder.build(model_cfg.voxel_generator)
     bv_range = voxel_generator.point_cloud_range[[0, 1, 3, 4]]
+    print("bv_range:", bv_range)
     box_coder = box_coder_builder.build(model_cfg.box_coder)
+    print("box_coder :", box_coder)
     target_assigner_cfg = model_cfg.target_assigner
+    print("target_assigner_cfg ", target_assigner_cfg)
     target_assigner = target_assigner_builder.build(target_assigner_cfg,
                                                     bv_range, box_coder)
+    print("target_assigner: ", target_assigner)
     box_coder.custom_ndim = target_assigner._anchor_generators[0].custom_ndim
     net = second_builder.build(
         model_cfg, voxel_generator, target_assigner, measure_time=measure_time)
@@ -175,7 +179,8 @@ def train(config_path,
     model_cfg = config.model.second
     train_cfg = config.train_config
 
-    net = build_network(model_cfg, measure_time).to(device)
+    #net = build_network(model_cfg, measure_time).to(device)
+    net = build_network(model_cfg, measure_time)
     # if train_cfg.enable_mixed_precision:
     #     net.half()
     #     net.metrics_to_float()
@@ -403,14 +408,14 @@ def train(config_path,
                     model_logging.log_text(
                         f'generate label finished({sec_per_ex:.2f}/s). start eval:',
                         global_step)
-                    result_dict = eval_dataset.dataset.evaluation(
-                        detections, str(result_path_step))
-                    for k, v in result_dict["results"].items():
-                        model_logging.log_text("Evaluation {}".format(k), global_step)
-                        model_logging.log_text(v, global_step)
-                    model_logging.log_metrics(result_dict["detail"], global_step)
-                    with open(result_path_step / "result.pkl", 'wb') as f:
-                        pickle.dump(detections, f)
+                    #result_dict = eval_dataset.dataset.evaluation(
+                    #    detections, str(result_path_step))
+                    #for k, v in result_dict["results"].items():
+                    #    model_logging.log_text("Evaluation {}".format(k), global_step)
+                    #    model_logging.log_text(v, global_step)
+                    #model_logging.log_metrics(result_dict["detail"], global_step)
+                    #with open(result_path_step / "result.pkl", 'wb') as f:
+                    #    pickle.dump(detections, f)
                     net.train()
                 step += 1
                 if step >= total_step:

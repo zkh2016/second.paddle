@@ -82,9 +82,14 @@ class NuScenesDataset(Dataset):
     def ground_truth_annotations(self):
         if "gt_boxes" not in self._nusc_infos[0]:
             return None
-        from nuscenes.eval.detection.config import eval_detection_configs
-        cls_range_map = eval_detection_configs[self.
-                                               eval_version]["class_range"]
+        #from nuscenes.eval.detection.config import eval_detection_configs
+        #cls_range_map = eval_detection_configs[self.
+        #                                       eval_version]["class_range"]
+        from nuscenes.eval.detection.config import config_factory
+        from nuscenes.eval.detection.config import DetectionConfig
+        cfg = config_factory(self.eval_version)
+        cls_range_map = cfg.class_range
+
         gt_annos = []
         for info in self._nusc_infos:
             gt_names = info["gt_names"]
