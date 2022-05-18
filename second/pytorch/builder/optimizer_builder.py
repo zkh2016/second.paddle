@@ -16,17 +16,18 @@
 
 from torchplus.train import learning_schedules
 from torchplus.train import optim
-import torch
-from torch import nn
+#import torch
+import paddle
+from paddle import nn
 from torchplus.train.fastai_optim import OptimWrapper, FastAIMixedOptim
 from functools import partial
 
-def children(m: nn.Module):
+def children(m: nn.Layer):
     "Get children of `m`."
     return list(m.children())
 
 
-def num_children(m: nn.Module) -> int:
+def num_children(m: nn.Layer) -> int:
     "Get number of children modules in `m`."
     return len(children(m))
 
@@ -53,27 +54,27 @@ def build(optimizer_config, net, name=None, mixed=False, loss_scale=512.0):
     if optimizer_type == 'rms_prop_optimizer':
         config = optimizer_config.rms_prop_optimizer
         optimizer_func = partial(
-            torch.optim.RMSprop,
-            alpha=config.decay,
+            paddle.optimizer.RMSProp,
+            rho=config.decay,
             momentum=config.momentum_optimizer_value,
-            eps=config.epsilon)
+            epsilon=config.epsilon)
 
     if optimizer_type == 'momentum_optimizer':
         config = optimizer_config.momentum_optimizer
         optimizer_func = partial(
-            torch.optim.SGD,
+            paddle.optimizer.SGD,
             momentum=config.momentum_optimizer_value,
-            eps=config.epsilon)
+            epsilon=config.epsilon)
 
     if optimizer_type == 'adam_optimizer':
         config = optimizer_config.adam_optimizer
         if optimizer_config.fixed_weight_decay:
             optimizer_func = partial(
-                torch.optim.Adam, betas=(0.9, 0.99), amsgrad=config.amsgrad)
+                paddle.optimizer.Adam, beta1=0.9, beta2=0.99)
         else:
             # regular adam
             optimizer_func = partial(
-                torch.optim.Adam, amsgrad=config.amsgrad)
+                paddle.optimizer.Adam)
 
 
 

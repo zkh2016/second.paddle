@@ -2,13 +2,14 @@ from collections import Iterable, defaultdict
 from copy import deepcopy
 from itertools import chain
 
+import paddle
 import torch
-from torch import nn
+from paddle import nn
 from torch._utils import _unflatten_dense_tensors
 from torch.autograd import Variable
-from torch.nn.utils import parameters_to_vector
+#from torch.nn.utils import parameters_to_vector
 
-bn_types = (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d)
+bn_types = (nn.BatchNorm1D, nn.BatchNorm2D, nn.BatchNorm3D)
 
 
 def split_bn_bias(layer_groups):
@@ -22,30 +23,38 @@ def split_bn_bias(layer_groups):
         split_groups += [nn.Sequential(*l1), nn.Sequential(*l2)]
     return split_groups
 
+def parameters_to_vector(parameters):
+    vec = []
+    for param in parameters:
+        vec.append(param)
+    return paddle.concat(vec)
 
 def get_master(layer_groups, flat_master: bool = False):
     "Return two lists, one for the model parameters in FP16 and one for the master parameters in FP32."
     split_groups = split_bn_bias(layer_groups)
     model_params = [[
-        param for param in lg.parameters() if param.requires_grad
+        param for param in lg.parameters() if param.stop_gradient==False
     ] for lg in split_groups]
     if flat_master:
         master_params = []
         for lg in model_params:
             if len(lg) != 0:
-                mp = parameters_to_vector([param.data.float() for param in lg])
-                mp = torch.nn.Parameter(mp, requires_grad=True)
+                tmp = parameters_to_vector([paddle.cast(param, dtype='float32') for param in lg])
+                #mp = torch.nn.Parameter(mp, requires_grad=True)
+                mp = paddle.create_parameter(mp.shape, mp.dtype)
+                mp.set_value(tmp)
+                mp.stop_gradient=False
                 if mp.grad is None: mp.grad = mp.new(*mp.size())
                 master_params.append([mp])
             else:
                 master_params.append([])
         return model_params, master_params
     else:
-        master_params = [[param.clone().float().detach() for param in lg]
+        master_params = [[paddle.cast(param.clone(), dtype='float32') for param in lg]
                          for lg in model_params]
         for mp in master_params:
             for param in mp:
-                param.requires_grad = True
+                param.stop_gradient = False
         return model_params, master_params
 
 
@@ -97,9 +106,13 @@ def listify(p=None, q=None):
     return list(p)
 
 
-def trainable_params(m: nn.Module):
+def trainable_params(m: nn.Layer):
     "Return list of trainable params in `m`."
-    res = filter(lambda p: p.requires_grad, m.parameters())
+    #res = filter(stop_gradient, m.parameters())
+    res = []
+    for p in m.parameters():
+        if not p.stop_gradient:
+            res.append(p)
     return res
 
 
@@ -108,13 +121,14 @@ def is_tuple(x) -> bool:
 
 
 # copy from fastai.
-class OptimWrapper(torch.optim.Optimizer):
+class OptimWrapper(paddle.optimizer.Optimizer):
     "Basic wrapper around `opt` to simplify hyper-parameters changes."
 
     def __init__(self, opt, wd, true_wd: bool = False, bn_wd: bool = True):
         # super().__init__(opt.param_groups, dict())
         self.opt, self.true_wd, self.bn_wd = opt, true_wd, bn_wd
-        self.opt_keys = list(self.opt.param_groups[0].keys())
+        print(self.opt._param_groups[0].keys())
+        self.opt_keys = list(self.opt._param_groups[0].keys())
         self.opt_keys.remove('params')
         self.read_defaults()
         self.wd = wd
@@ -123,10 +137,12 @@ class OptimWrapper(torch.optim.Optimizer):
     def create(cls, opt_func, lr, layer_groups, **kwargs):
         "Create an `optim.Optimizer` from `opt_func` with `lr`. Set lr on `layer_groups`."
         split_groups = split_bn_bias(layer_groups)
-        opt = opt_func([{
+        opt = opt_func(parameters=[{
             'params': trainable_params(l),
-            'lr': 0
-        } for l in split_groups])
+            'learning_rate':0,
+            'beta1':0.9,
+            'beta2':0.99
+        } for l in split_groups], learning_rate=0.0, beta1=0.9, beta2=0.99)
         opt = cls(opt, **kwargs)
         opt.lr, opt.opt_func = listify(lr, layer_groups), opt_func
         return opt
@@ -137,7 +153,7 @@ class OptimWrapper(torch.optim.Optimizer):
         split_groups = split_bn_bias(layer_groups)
         opt = opt_func([{
             'params': trainable_params(l),
-            'lr': 0
+            'learning_rate': 0
         } for l in split_groups])
         return self.create(
             opt_func,
@@ -156,8 +172,8 @@ class OptimWrapper(torch.optim.Optimizer):
         # weight decay outside of optimizer step (AdamW)
         if self.true_wd:
             for lr, wd, pg1, pg2 in zip(self._lr, self._wd,
-                                        self.opt.param_groups[::2],
-                                        self.opt.param_groups[1::2]):
+                                        self.opt._param_groups[::2],
+                                        self.opt._param_groups[1::2]):
                 for p in pg1['params']:
                     p.data.mul_(1 - wd * lr)
                 if self.bn_wd:
@@ -168,7 +184,8 @@ class OptimWrapper(torch.optim.Optimizer):
 
     def zero_grad(self) -> None:
         "Clear optimizer gradients."
-        self.opt.zero_grad()
+        #self.opt.zero_grad()
+        self.opt.clear_grad()
 
     #Passthrough to the inner opt.
     def __getstate__(self):
@@ -194,7 +211,7 @@ class OptimWrapper(torch.optim.Optimizer):
 
     @property
     def param_groups(self):
-        return self.opt.param_groups
+        return self.opt._param_groups
 
     @property
     def defaults(self):
@@ -212,7 +229,7 @@ class OptimWrapper(torch.optim.Optimizer):
 
     @lr.setter
     def lr(self, val: float) -> None:
-        self._lr = self.set_val('lr', listify(val, self._lr))
+        self._lr = self.set_val('learning_rate', listify(val, self._lr))
 
     @property
     def mom(self) -> float:
@@ -222,8 +239,14 @@ class OptimWrapper(torch.optim.Optimizer):
     def mom(self, val: float) -> None:
         if 'momentum' in self.opt_keys:
             self.set_val('momentum', listify(val, self._mom))
-        elif 'betas' in self.opt_keys:
-            self.set_val('betas', (listify(val, self._mom), self._beta))
+        #elif 'betas' in self.opt_keys:
+        #    self.set_val('betas', (listify(val, self._mom), self._beta))
+        elif 'beta1' in self.opt_keys:
+            print("set val beta1")
+            self.set_val('beta1', listify(val, self._mom))
+        elif 'beta2' in self.opt_keys:
+            print("set val beta2")
+            self.set_val('beta2', listify(val, self._beta))
         self._mom = listify(val, self._mom)
 
     @property
@@ -234,8 +257,12 @@ class OptimWrapper(torch.optim.Optimizer):
     def beta(self, val: float) -> None:
         "Set beta (or alpha as makes sense for given optimizer)."
         if val is None: return
-        if 'betas' in self.opt_keys:
-            self.set_val('betas', (self._mom, listify(val, self._beta)))
+        #if 'betas' in self.opt_keys:
+        #    self.set_val('betas', (self._mom, listify(val, self._beta)))
+        if 'beta1' in self.opt_keys:
+            self.set_val('beta1', listify(val, self._mom))
+        if 'beta2' in self.opt_keys:
+            self.set_val('beta2', listify(val, self._beta))
         elif 'alpha' in self.opt_keys:
             self.set_val('alpha', listify(val, self._beta))
         self._beta = listify(val, self._beta)
@@ -256,26 +283,35 @@ class OptimWrapper(torch.optim.Optimizer):
     def read_defaults(self) -> None:
         "Read the values inside the optimizer for the hyper-parameters."
         self._beta = None
-        if 'lr' in self.opt_keys: self._lr = self.read_val('lr')
+        #if 'lr' in self.opt_keys: self._lr = self.read_val('lr')
+        if 'learning_rate' in self.opt_keys: 
+            print('read lr')
+            self._lr = self.read_val('learning_rate')
         if 'momentum' in self.opt_keys: self._mom = self.read_val('momentum')
         if 'alpha' in self.opt_keys: self._beta = self.read_val('alpha')
-        if 'betas' in self.opt_keys:
-            self._mom, self._beta = self.read_val('betas')
+        #if 'betas' in self.opt_keys:
+        #    self._mom, self._beta = self.read_val('betas')
+        if 'beta1' in self.opt_keys:
+            print("read beta1")
+            self._mom = self.read_val('beta1')
+        if 'beta2' in self.opt_keys:
+            print("read beta2")
+            self._beta = self.read_val('beta2')
         if 'weight_decay' in self.opt_keys:
             self._wd = self.read_val('weight_decay')
 
     def set_val(self, key: str, val, bn_groups: bool = True):
         "Set `val` inside the optimizer dictionary at `key`."
         if is_tuple(val): val = [(v1, v2) for v1, v2 in zip(*val)]
-        for v, pg1, pg2 in zip(val, self.opt.param_groups[::2],
-                               self.opt.param_groups[1::2]):
+        for v, pg1, pg2 in zip(val, self.opt._param_groups[::2],
+                               self.opt._param_groups[1::2]):
             pg1[key] = v
             if bn_groups: pg2[key] = v
         return val
 
     def read_val(self, key: str):
         "Read a hyperparameter `key` in the optimizer dictionary."
-        val = [pg[key] for pg in self.opt.param_groups[::2]]
+        val = [pg[key] for pg in self.opt._param_groups[::2]]
         if is_tuple(val[0]): val = [o[0] for o in val], [o[1] for o in val]
         return val
 
@@ -303,7 +339,7 @@ class FastAIMixedOptim(OptimWrapper):
         lrs = [lr for lr in opt._lr for _ in range(2)]
         opt_params = [{
             'params': mp,
-            'lr': lr
+            'learning_rate': lr
         } for mp, lr in zip(opt.master_params, lrs)]
         opt.opt = opt_func(opt_params)
         opt.mom, opt.wd, opt.beta = mom, wd, beta

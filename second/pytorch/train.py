@@ -188,7 +188,7 @@ def train(config_path,
     target_assigner = net.target_assigner
     voxel_generator = net.voxel_generator
     print("num parameters:", len(list(net.parameters())))
-    torchplus.train.try_restore_latest_checkpoints(model_dir, [net])
+    #torchplus.train.try_restore_latest_checkpoints(model_dir, [net])
     if pretrained_path is not None:
         model_dict = net.state_dict()
         pretrained_dict = torch.load(pretrained_path)
@@ -230,8 +230,8 @@ def train(config_path,
         net.metrics_to_float()
     else:
         amp_optimizer = fastai_optimizer
-    torchplus.train.try_restore_latest_checkpoints(model_dir,
-                                                   [fastai_optimizer])
+    #torchplus.train.try_restore_latest_checkpoints(model_dir,
+    #                                               [fastai_optimizer])
     lr_scheduler = lr_scheduler_builder.build(optimizer_cfg, amp_optimizer,
                                               train_cfg.steps)
     if train_cfg.enable_mixed_precision:
