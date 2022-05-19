@@ -405,11 +405,11 @@ class RPNV2(RPNBase):
 
         return block, planes
 
-def test():
-   rpn = RPNV2() 
-   shape = [8, 128, 200, 176]
-   x = paddle.randn(shape)
-
-   out = rpn(x)
+#def test():
+#   rpn = RPNV2() 
+#   shape = [8, 128, 200, 176]
+#   x = paddle.randn(shape)
+#
+#   out = rpn(x)
     
 #test()

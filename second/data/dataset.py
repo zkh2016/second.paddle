@@ -2,6 +2,7 @@ import pathlib
 import pickle
 import time
 from functools import partial
+import paddle
 
 import numpy as np
 
@@ -25,7 +26,7 @@ def get_dataset_class(name):
     return REGISTERED_DATASET_CLASSES[name]
 
 
-class Dataset(object):
+class Dataset(paddle.io.Dataset):
     """An abstract class representing a pytorch-like Dataset.
     All other datasets should subclass it. All subclasses should override
     ``__len__``, that provides the size of the dataset, and ``__getitem__``,

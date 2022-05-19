@@ -9,6 +9,7 @@ import re
 import fire
 import numpy as np
 import torch
+import paddle
 from google.protobuf import text_format
 
 import second.data.kitti_common as kitti
@@ -50,6 +51,36 @@ def example_convert_to_torch(example, dtype=torch.float32,
             example_torch[k] = calib
         elif k == "num_voxels":
             example_torch[k] = torch.tensor(v)
+        else:
+            example_torch[k] = v
+    return example_torch
+
+def example_convert_to_paddle(example, dtype=paddle.float32,
+                             device=None) -> dict:
+    #device = device or torch.device("cuda:0")
+    example_torch = {}
+    float_names = [
+        "voxels", "anchors", "reg_targets", "reg_weights", "bev_map", "importance"
+    ]
+    for k, v in example.items():
+        if k in float_names:
+            # slow when directly provide fp32 data with dtype=torch.half
+            print(v.dtype, type(v))
+            example_torch[k] = paddle.to_tensor(v, dtype=dtype)
+        elif k in ["coordinates", "labels", "num_points"]:
+            example_torch[k] = paddle.to_tensor(
+                v, dtype=paddle.int32)
+        elif k in ["anchors_mask"]:
+            example_torch[k] = paddle.to_tensor(
+                v, dtype=paddle.uint8)
+        elif k == "calib":
+            calib = {}
+            for k1, v1 in v.items():
+                calib[k1] = paddle.to_tensor(
+                    v1, dtype=dtype)
+            example_torch[k] = calib
+        elif k == "num_voxels":
+            example_torch[k] = paddle.to_tensor(v)
         else:
             example_torch[k] = v
     return example_torch
@@ -235,9 +266,9 @@ def train(config_path,
     lr_scheduler = lr_scheduler_builder.build(optimizer_cfg, amp_optimizer,
                                               train_cfg.steps)
     if train_cfg.enable_mixed_precision:
-        float_dtype = torch.float16
+        float_dtype = paddle.float16
     else:
-        float_dtype = torch.float32
+        float_dtype = paddle.float32
 
     if multi_gpu:
         num_gpu = torch.cuda.device_count()
@@ -265,20 +296,24 @@ def train(config_path,
         target_assigner=target_assigner)
 
     dataloader = torch.utils.data.DataLoader(
+    #dataloader = paddle.io.DataLoader(
         dataset,
         batch_size=input_cfg.batch_size * num_gpu,
         shuffle=True,
-        num_workers=input_cfg.preprocess.num_workers * num_gpu,
+        num_workers=1,#input_cfg.preprocess.num_workers * num_gpu,
         pin_memory=False,
+        #use_shared_memory=False,
         collate_fn=collate_fn,
         worker_init_fn=_worker_init_fn,
         drop_last=not multi_gpu)
     eval_dataloader = torch.utils.data.DataLoader(
+    #eval_dataloader = paddle.io.DataLoader(
         eval_dataset,
         batch_size=eval_input_cfg.batch_size, # only support multi-gpu train
         shuffle=False,
-        num_workers=eval_input_cfg.preprocess.num_workers,
+        num_workers=1,#eval_input_cfg.preprocess.num_workers,
         pin_memory=False,
+        #use_shared_memory=False,
         collate_fn=merge_second_batch)
 
     ######################
@@ -301,14 +336,17 @@ def train(config_path,
             if clear_metrics_every_epoch:
                 net.clear_metrics()
             for example in dataloader:
+                print("example", example.keys())
+
                 lr_scheduler.step(net.get_global_step())
                 time_metrics = example["metrics"]
                 example.pop("metrics")
-                example_torch = example_convert_to_torch(example, float_dtype)
+                #example_torch = example_convert_to_torch(example, float_dtype)
+                example_paddle = example_convert_to_paddle(example, float_dtype)
 
                 batch_size = example["anchors"].shape[0]
 
-                ret_dict = net_parallel(example_torch)
+                ret_dict = net_parallel(example_paddle)
                 cls_preds = ret_dict["cls_preds"]
                 loss = ret_dict["loss"].mean()
                 cls_loss_reduced = ret_dict["cls_loss_reduced"].mean()
@@ -319,7 +357,7 @@ def train(config_path,
                 cls_loss = ret_dict["cls_loss"]
                 
                 cared = ret_dict["cared"]
-                labels = example_torch["labels"]
+                labels = example_paddle["labels"]
                 if train_cfg.enable_mixed_precision:
                     with amp.scale_loss(loss, amp_optimizer) as scaled_loss:
                         scaled_loss.backward()
@@ -339,10 +377,10 @@ def train(config_path,
                 metrics = {}
                 num_pos = int((labels > 0)[0].float().sum().cpu().numpy())
                 num_neg = int((labels == 0)[0].float().sum().cpu().numpy())
-                if 'anchors_mask' not in example_torch:
-                    num_anchors = example_torch['anchors'].shape[1]
+                if 'anchors_mask' not in example_paddle:
+                    num_anchors = example_paddle['anchors'].shape[1]
                 else:
-                    num_anchors = int(example_torch['anchors_mask'][0].sum())
+                    num_anchors = int(example_paddle['anchors_mask'][0].sum())
                 global_step = net.get_global_step()
 
                 if global_step % display_step == 0:
@@ -372,7 +410,7 @@ def train(config_path,
                             dir_loss_reduced.detach().cpu().numpy())
 
                     metrics["misc"] = {
-                        "num_vox": int(example_torch["voxels"].shape[0]),
+                        "num_vox": int(example_paddle["voxels"].shape[0]),
                         "num_pos": int(num_pos),
                         "num_neg": int(num_neg),
                         "num_anchors": int(num_anchors),
