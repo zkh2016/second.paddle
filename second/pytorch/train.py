@@ -65,7 +65,6 @@ def example_convert_to_paddle(example, dtype=paddle.float32,
     for k, v in example.items():
         if k in float_names:
             # slow when directly provide fp32 data with dtype=torch.half
-            print(v.dtype, type(v))
             example_torch[k] = paddle.to_tensor(v, dtype=dtype)
         elif k in ["coordinates", "labels", "num_points"]:
             example_torch[k] = paddle.to_tensor(
@@ -89,14 +88,10 @@ def example_convert_to_paddle(example, dtype=paddle.float32,
 def build_network(model_cfg, measure_time=False):
     voxel_generator = voxel_builder.build(model_cfg.voxel_generator)
     bv_range = voxel_generator.point_cloud_range[[0, 1, 3, 4]]
-    print("bv_range:", bv_range)
     box_coder = box_coder_builder.build(model_cfg.box_coder)
-    print("box_coder :", box_coder)
     target_assigner_cfg = model_cfg.target_assigner
-    print("target_assigner_cfg ", target_assigner_cfg)
     target_assigner = target_assigner_builder.build(target_assigner_cfg,
                                                     bv_range, box_coder)
-    print("target_assigner: ", target_assigner)
     box_coder.custom_ndim = target_assigner._anchor_generators[0].custom_ndim
     net = second_builder.build(
         model_cfg, voxel_generator, target_assigner, measure_time=measure_time)
@@ -218,7 +213,6 @@ def train(config_path,
     #     net.convert_norm_to_float(net)
     target_assigner = net.target_assigner
     voxel_generator = net.voxel_generator
-    print("num parameters:", len(list(net.parameters())))
     #torchplus.train.try_restore_latest_checkpoints(model_dir, [net])
     if pretrained_path is not None:
         model_dict = net.state_dict()
@@ -228,16 +222,13 @@ def train(config_path,
         for k, v in pretrained_dict.items():
             if k in model_dict and v.shape == model_dict[k].shape:
                 new_pretrained_dict[k] = v        
-        print("Load pretrained parameters:")
-        for k, v in new_pretrained_dict.items():
-            print(k, v.shape)
         model_dict.update(new_pretrained_dict) 
         net.load_state_dict(model_dict)
         freeze_params_v2(dict(net.named_parameters()), freeze_include, freeze_exclude)
         net.clear_global_step()
         net.clear_metrics()
     if multi_gpu:
-        net_parallel = torch.nn.DataParallel(net)
+        net_parallel = paddle.DataParallel(net)
     else:
         net_parallel = net
     optimizer_cfg = train_cfg.optimizer
@@ -336,7 +327,6 @@ def train(config_path,
             if clear_metrics_every_epoch:
                 net.clear_metrics()
             for example in dataloader:
-                print("example", example.keys())
 
                 lr_scheduler.step(net.get_global_step())
                 time_metrics = example["metrics"]
@@ -363,7 +353,9 @@ def train(config_path,
                         scaled_loss.backward()
                 else:
                     loss.backward()
-                torch.nn.utils.clip_grad_norm_(net.parameters(), 10.0)
+                #torch.nn.utils.clip_grad_norm_(net.parameters(), 10.0)
+                #clip_norm = paddle.nn.ClipGradByNorm(clip_norm=10.0)
+                #clip_norm(net.parameters())
                 amp_optimizer.step()
                 amp_optimizer.zero_grad()
                 net.update_global_step()
@@ -375,8 +367,8 @@ def train(config_path,
                 step_times.append(step_time)
                 t = time.time()
                 metrics = {}
-                num_pos = int((labels > 0)[0].float().sum().cpu().numpy())
-                num_neg = int((labels == 0)[0].float().sum().cpu().numpy())
+                num_pos = int(paddle.cast((labels > 0)[0], dtype='float32').sum().numpy())
+                num_neg = int(paddle.cast((labels == 0)[0], dtype='float32').sum().numpy())
                 if 'anchors_mask' not in example_paddle:
                     num_anchors = example_paddle['anchors'].shape[1]
                 else:
@@ -389,7 +381,7 @@ def train(config_path,
                             print(f"avg {name} time = {val * 1000:.3f} ms")
 
                     loc_loss_elem = [
-                        float(loc_loss[:, :, i].sum().detach().cpu().numpy() /
+                        float(loc_loss[:, :, i].sum().detach().numpy() /
                               batch_size) for i in range(loc_loss.shape[-1])
                     ]
                     metrics["runtime"] = {
@@ -401,13 +393,13 @@ def train(config_path,
                     metrics.update(net_metrics)
                     metrics["loss"]["loc_elem"] = loc_loss_elem
                     metrics["loss"]["cls_pos_rt"] = float(
-                        cls_pos_loss.detach().cpu().numpy())
+                        cls_pos_loss.detach().numpy())
                     metrics["loss"]["cls_neg_rt"] = float(
-                        cls_neg_loss.detach().cpu().numpy())
+                        cls_neg_loss.detach().numpy())
                     if model_cfg.use_direction_classifier:
                         dir_loss_reduced = ret_dict["dir_loss_reduced"].mean()
                         metrics["loss"]["dir_rt"] = float(
-                            dir_loss_reduced.detach().cpu().numpy())
+                            dir_loss_reduced.detach().numpy())
 
                     metrics["misc"] = {
                         "num_vox": int(example_paddle["voxels"].shape[0]),

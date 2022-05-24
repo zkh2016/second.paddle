@@ -3,6 +3,7 @@ import contextlib
 import paddle
 from paddle import nn
 from enum import Enum
+import torchplus
 from second.pytorch.core import box_paddle_ops
 
 from second.pytorch.core.losses import (WeightedSigmoidClassificationLoss,
@@ -17,10 +18,10 @@ def _get_pos_neg_loss(cls_loss, labels):
     # labels: [N, num_anchors]
     batch_size = cls_loss.shape[0]
     if cls_loss.shape[-1] == 1 or len(cls_loss.shape) == 2:
-        cls_pos_loss = (labels > 0).type_as(cls_loss) * cls_loss.view(
-            batch_size, -1)
-        cls_neg_loss = (labels == 0).type_as(cls_loss) * cls_loss.view(
-            batch_size, -1)
+        cls_pos_loss = paddle.cast((labels > 0), cls_loss.dtype) * cls_loss.reshape((
+            batch_size, -1))
+        cls_neg_loss = paddle.cast((labels == 0), cls_loss.dtype) * cls_loss.reshape((
+            batch_size, -1))
         cls_pos_loss = cls_pos_loss.sum() / batch_size
         cls_neg_loss = cls_neg_loss.sum() / batch_size
     else:
@@ -251,7 +252,7 @@ class VoxelNet(nn.Layer):
             loss_norm_type=self._loss_norm_type,
             dtype=box_preds.dtype)
 
-        cls_targets = labels * cared.type_as(labels)
+        cls_targets = paddle.cast(labels * cared, labels.dtype)
         cls_targets = cls_targets.unsqueeze(-1)
         self.end_timer("prepare weight forward")
         self.start_timer("create_loss forward")
@@ -286,9 +287,9 @@ class VoxelNet(nn.Layer):
                 reg_targets,
                 dir_offset=self._dir_offset,
                 num_bins=self._num_direction_bins)
-            dir_logits = preds_dict["dir_cls_preds"].view(
-                batch_size_dev, -1, self._num_direction_bins)
-            weights = (labels > 0).type_as(dir_logits) * importance
+            dir_logits = preds_dict["dir_cls_preds"].reshape((
+                batch_size_dev, -1, self._num_direction_bins))
+            weights = paddle.cast((labels > 0), dir_logits.dtype) * importance
             weights /= paddle.clip(weights.sum(-1, keepdim=True), min=1.0)
             dir_loss = self._dir_loss_ftor(
                 dir_logits, dir_targets, weights=weights)
@@ -333,6 +334,7 @@ class VoxelNet(nn.Layer):
         self.start_timer("rpn forward")
         preds_dict = self.rpn(spatial_features)
         self.end_timer("rpn forward")
+        #print("voxelnet forward out.shape=", preds_dict.shape)
         return preds_dict
 
     def forward(self, example):
@@ -361,7 +363,7 @@ class VoxelNet(nn.Layer):
         # coors: [num_voxels, 4]
         preds_dict = self.network_forward(voxels, num_points, coors, batch_size_dev)
         # need to check size.
-        box_preds = preds_dict["box_preds"].view(batch_size_dev, -1, self._box_coder.code_size)
+        box_preds = preds_dict["box_preds"].reshape((batch_size_dev, -1, self._box_coder.code_size))
         err_msg = f"num_anchors={batch_anchors.shape[1]}, but num_output={box_preds.shape[1]}. please check size"
         assert batch_anchors.shape[1] == box_preds.shape[1], err_msg
         if self.training:
@@ -391,30 +393,30 @@ class VoxelNet(nn.Layer):
             meta_list = [None] * batch_size
         else:
             meta_list = example["metadata"]
-        batch_anchors = example["anchors"].view(batch_size, -1,
-                                                example["anchors"].shape[-1])
+        batch_anchors = example["anchors"].reshape((batch_size, -1,
+                                                example["anchors"].shape[-1]))
         if "anchors_mask" not in example:
             batch_anchors_mask = [None] * batch_size
         else:
-            batch_anchors_mask = example["anchors_mask"].view(batch_size, -1)
+            batch_anchors_mask = example["anchors_mask"].reshape((batch_size, -1))
 
         t = time.time()
         batch_box_preds = preds_dict["box_preds"]
         batch_cls_preds = preds_dict["cls_preds"]
-        batch_box_preds = batch_box_preds.view(batch_size, -1,
-                                               self._box_coder.code_size)
+        batch_box_preds = batch_box_preds.reshape((batch_size, -1,
+                                               self._box_coder.code_size))
         num_class_with_bg = self._num_class
         if not self._encode_background_as_zeros:
             num_class_with_bg = self._num_class + 1
 
-        batch_cls_preds = batch_cls_preds.view(batch_size, -1,
-                                               num_class_with_bg)
+        batch_cls_preds = batch_cls_preds.reshape((batch_size, -1,
+                                               num_class_with_bg))
         batch_box_preds = self._box_coder.decode_paddle(batch_box_preds,
                                                        batch_anchors)
         if self._use_direction_classifier:
             batch_dir_preds = preds_dict["dir_cls_preds"]
-            batch_dir_preds = batch_dir_preds.view(batch_size, -1,
-                                                   self._num_direction_bins)
+            batch_dir_preds = batch_dir_preds.reshape((batch_size, -1,
+                                                   self._num_direction_bins))
         else:
             batch_dir_preds = [None] * batch_size
 
@@ -478,32 +480,32 @@ class VoxelNet(nn.Layer):
                         score_threshs,
                         pre_max_sizes, post_max_sizes, iou_thresholds):
                     if self._nms_class_agnostic:
-                        class_scores = total_scores.view(
+                        class_scores = total_scores.reshape((
                             feature_map_size_prod, -1,
-                            self._num_class)[..., class_idx]
-                        class_scores = class_scores.contiguous().view(-1)
-                        class_boxes_nms = boxes.view(-1,
-                                                     boxes_for_nms.shape[-1])
+                            self._num_class))[..., class_idx]
+                        class_scores = class_scores.contiguous().reshape((-1))
+                        class_boxes_nms = boxes.reshape((-1,
+                                                     boxes_for_nms.shape[-1]))
                         class_boxes = box_preds
                         class_dir_labels = dir_labels
                     else:
                         anchors_range = self.target_assigner.anchors_range(class_idx)
-                        class_scores = total_scores.view(
+                        class_scores = total_scores.reshape((
                             -1,
-                            self._num_class)[anchors_range[0]:anchors_range[1], class_idx]
-                        class_boxes_nms = boxes.view(-1,
-                            boxes_for_nms.shape[-1])[anchors_range[0]:anchors_range[1], :]
-                        class_scores = class_scores.contiguous().view(-1)
-                        class_boxes_nms = class_boxes_nms.contiguous().view(
-                            -1, boxes_for_nms.shape[-1])
-                        class_boxes = box_preds.view(-1,
-                            box_preds.shape[-1])[anchors_range[0]:anchors_range[1], :]
-                        class_boxes = class_boxes.contiguous().view(
-                            -1, box_preds.shape[-1])
+                            self._num_class))[anchors_range[0]:anchors_range[1], class_idx]
+                        class_boxes_nms = boxes.reshape((-1,
+                            boxes_for_nms.shape[-1]))[anchors_range[0]:anchors_range[1], :]
+                        class_scores = class_scores.contiguous().reshape((-1))
+                        class_boxes_nms = class_boxes_nms.contiguous().reshape((
+                            -1, boxes_for_nms.shape[-1]))
+                        class_boxes = box_preds.reshape((-1,
+                            box_preds.shape[-1]))[anchors_range[0]:anchors_range[1], :]
+                        class_boxes = class_boxes.contiguous().reshape((
+                            -1, box_preds.shape[-1]))
                         if self._use_direction_classifier:
-                            class_dir_labels = dir_labels.view(-1)[anchors_range[0]:anchors_range[1]]
+                            class_dir_labels = dir_labels.reshape((-1))[anchors_range[0]:anchors_range[1]]
                             class_dir_labels = class_dir_labels.contiguous(
-                            ).view(-1)
+                            ).reshape((-1))
                     if score_thresh > 0.0:
                         class_scores_keep = class_scores >= score_thresh
                         if class_scores_keep.shape[0] == 0:
@@ -651,7 +653,7 @@ class VoxelNet(nn.Layer):
         num_class = self._num_class
         if not self._encode_background_as_zeros:
             num_class += 1
-        cls_preds = cls_preds.view(batch_size, -1, num_class)
+        cls_preds = cls_preds.reshape((batch_size, -1, num_class))
         rpn_acc = self.rpn_acc(labels, cls_preds, sampled).numpy()[0]
         prec, recall = self.rpn_metrics(labels, cls_preds, sampled)
         prec = prec.numpy()
@@ -661,9 +663,9 @@ class VoxelNet(nn.Layer):
         ret = {
             "loss": {
                 "cls_loss": float(rpn_cls_loss),
-                "cls_loss_rt": float(cls_loss.data.cpu().numpy()),
+                "cls_loss_rt": float(cls_loss.numpy()),
                 'loc_loss': float(rpn_loc_loss),
-                "loc_loss_rt": float(loc_loss.data.cpu().numpy()),
+                "loc_loss_rt": float(loc_loss.numpy()),
             },
             "rpn_acc": float(rpn_acc),
             "pr": {},
@@ -724,11 +726,11 @@ def create_loss(loc_loss_ftor,
                 box_code_size=7,
                 num_direction_bins=2):
     batch_size = int(box_preds.shape[0])
-    box_preds = box_preds.view(batch_size, -1, box_code_size)
+    box_preds = box_preds.reshape((batch_size, -1, box_code_size))
     if encode_background_as_zeros:
-        cls_preds = cls_preds.view(batch_size, -1, num_class)
+        cls_preds = cls_preds.reshape((batch_size, -1, num_class))
     else:
-        cls_preds = cls_preds.view(batch_size, -1, num_class + 1)
+        cls_preds = cls_preds.reshape((batch_size, -1, num_class + 1))
     cls_targets = cls_targets.squeeze(-1)
     one_hot_targets = torchplus.nn.one_hot(
         cls_targets, depth=num_class + 1, dtype=box_preds.dtype)
@@ -759,21 +761,21 @@ def prepare_loss_weights(labels,
     # cared: [N, num_anchors]
     positives = labels > 0
     negatives = labels == 0
-    negative_cls_weights = negatives.type(dtype) * neg_cls_weight
-    cls_weights = negative_cls_weights + pos_cls_weight * positives.type(dtype)
-    reg_weights = positives.type(dtype)
+    negative_cls_weights = paddle.cast(negatives, dtype) * neg_cls_weight
+    cls_weights = negative_cls_weights + pos_cls_weight * paddle.cast(positives, dtype)
+    reg_weights = paddle.cast(positives, dtype)
     if loss_norm_type == LossNormType.NormByNumExamples:
-        num_examples = cared.type(dtype).sum(1, keepdim=True)
+        num_examples = paddle.cast(cared, dtype).sum(1, keepdim=True)
         num_examples = paddle.clip(num_examples, min=1.0)
         cls_weights /= num_examples
-        bbox_normalizer = positives.sum(1, keepdim=True).type(dtype)
+        bbox_normalizer = paddle.cast(positives.sum(1, keepdim=True), dtype)
         reg_weights /= paddle.clip(bbox_normalizer, min=1.0)
     elif loss_norm_type == LossNormType.NormByNumPositives:  # for focal loss
-        pos_normalizer = positives.sum(1, keepdim=True).type(dtype)
+        pos_normalizer = paddle.cast(positives.sum(1, keepdim=True), dtype)
         reg_weights /= paddle.clip(pos_normalizer, min=1.0)
         cls_weights /= paddle.clip(pos_normalizer, min=1.0)
     elif loss_norm_type == LossNormType.NormByNumPosNeg:
-        pos_neg = paddle.stack([positives, negatives], dim=-1).type(dtype)
+        pos_neg = paddle.cast(paddle.stack([positives, negatives], dim=-1), dtype)
         normalizer = pos_neg.sum(1, keepdim=True)  # [N, 1, 2]
         cls_normalizer = (pos_neg * normalizer).sum(-1)  # [N, M]
         cls_normalizer = paddle.clip(cls_normalizer, min=1.0)
@@ -782,7 +784,7 @@ def prepare_loss_weights(labels,
         reg_weights /= normalizer[:, 0:1, 0]
         cls_weights /= cls_normalizer
     elif loss_norm_type == LossNormType.DontNorm:  # support ghm loss
-        pos_normalizer = positives.sum(1, keepdim=True).type(dtype)
+        pos_normalizer = paddle.cast(positives.sum(1, keepdim=True), dtype)
         reg_weights /= paddle.clip(pos_normalizer, min=1.0)
     else:
         raise ValueError(
@@ -796,7 +798,7 @@ def assign_weight_to_each_class(labels,
                                 dtype=paddle.float32):
     weights = paddle.zeros(labels.shape, dtype=dtype)
     for label, weight in weight_per_class:
-        positives = (labels == label).type(dtype)
+        positives = paddle.cast((labels == label), dtype)
         weight_class = weight * positives
         if norm_by_num:
             normalizer = positives.sum()
@@ -812,10 +814,11 @@ def get_direction_target(anchors,
                          dir_offset=0,
                          num_bins=2):
     batch_size = reg_targets.shape[0]
-    anchors = anchors.view(batch_size, -1, anchors.shape[-1])
+    anchors = anchors.reshape((batch_size, -1, anchors.shape[-1]))
     rot_gt = reg_targets[..., 6] + anchors[..., 6]
     offset_rot = box_paddle_ops.limit_period(rot_gt - dir_offset, 0, 2 * np.pi)
-    dir_cls_targets = paddle.floor(offset_rot / (2 * np.pi / num_bins)).long()
+    dir_cls_targets = paddle.floor(offset_rot / (2 * np.pi / num_bins))
+    dir_cls_targets = paddle.cast(dir_cls_targets, paddle.int64)
     dir_cls_targets = paddle.clip(dir_cls_targets, min=0, max=num_bins - 1)
     if one_hot:
         dir_cls_targets = torchplus.nn.one_hot(

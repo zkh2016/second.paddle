@@ -127,7 +127,6 @@ class OptimWrapper(paddle.optimizer.Optimizer):
     def __init__(self, opt, wd, true_wd: bool = False, bn_wd: bool = True):
         # super().__init__(opt.param_groups, dict())
         self.opt, self.true_wd, self.bn_wd = opt, true_wd, bn_wd
-        print(self.opt._param_groups[0].keys())
         self.opt_keys = list(self.opt._param_groups[0].keys())
         self.opt_keys.remove('params')
         self.read_defaults()
@@ -175,10 +174,12 @@ class OptimWrapper(paddle.optimizer.Optimizer):
                                         self.opt._param_groups[::2],
                                         self.opt._param_groups[1::2]):
                 for p in pg1['params']:
-                    p.data.mul_(1 - wd * lr)
+                    tmp = paddle.full(p.shape, 1-wd*lr)
+                    p.multiply(tmp)
                 if self.bn_wd:
                     for p in pg2['params']:
-                        p.data.mul_(1 - wd * lr)
+                        tmp = paddle.full(p.shape, 1-wd*lr)
+                        p.multiply(tmp)
             self.set_val('weight_decay', listify(0, self._wd))
         self.opt.step()
 
@@ -242,10 +243,8 @@ class OptimWrapper(paddle.optimizer.Optimizer):
         #elif 'betas' in self.opt_keys:
         #    self.set_val('betas', (listify(val, self._mom), self._beta))
         elif 'beta1' in self.opt_keys:
-            print("set val beta1")
             self.set_val('beta1', listify(val, self._mom))
         elif 'beta2' in self.opt_keys:
-            print("set val beta2")
             self.set_val('beta2', listify(val, self._beta))
         self._mom = listify(val, self._mom)
 
@@ -285,17 +284,14 @@ class OptimWrapper(paddle.optimizer.Optimizer):
         self._beta = None
         #if 'lr' in self.opt_keys: self._lr = self.read_val('lr')
         if 'learning_rate' in self.opt_keys: 
-            print('read lr')
             self._lr = self.read_val('learning_rate')
         if 'momentum' in self.opt_keys: self._mom = self.read_val('momentum')
         if 'alpha' in self.opt_keys: self._beta = self.read_val('alpha')
         #if 'betas' in self.opt_keys:
         #    self._mom, self._beta = self.read_val('betas')
         if 'beta1' in self.opt_keys:
-            print("read beta1")
             self._mom = self.read_val('beta1')
         if 'beta2' in self.opt_keys:
-            print("read beta2")
             self._beta = self.read_val('beta2')
         if 'weight_decay' in self.opt_keys:
             self._wd = self.read_val('weight_decay')

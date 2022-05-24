@@ -33,8 +33,8 @@ class SpMiddleFHD(paddle.nn.Layer):
 
         sparse_shape = np.array(output_shape[1:4]) + [1, 0, 0]
         # sparse_shape[0] = 11
-        print(sparse_shape)
         self.sparse_shape = sparse_shape
+        self.num_input_features  = num_input_features
         self.voxel_output_shape = output_shape
         # input: # [1600, 1200, 41]
         self.middle_conv = paddle.nn.Sequential(
@@ -84,7 +84,7 @@ class SpMiddleFHD(paddle.nn.Layer):
         self.max_batch_size = 6
         # self.grid = torch.full([self.max_batch_size, *sparse_shape], -1, dtype=torch.int32).cuda()
 
-    def forward(self, voxel_features, coors, batch_size, shape=None):
+    def forward(self, voxel_features, coors, batch_size):
         # coors[:, 1] += 1
         #coors = coors.int()
         #ret = spconv.SparseConvTensor(voxel_features, coors, self.sparse_shape,
@@ -97,7 +97,8 @@ class SpMiddleFHD(paddle.nn.Layer):
         #return ret
 
         #coors = paddle.cast(coors, 'int64')
-        sp_x = sparse.sparse_coo_tensor(coors.transpose((1,0)), voxel_features, shape)
+        shape = [batch_size] + list(self.sparse_shape) + [self.num_input_features]
+        sp_x = sparse.sparse_coo_tensor(coors.transpose((1,0)), voxel_features, shape=shape)
         out = self.middle_conv(sp_x)
         #out = out.to_dense()
         out = sparse.sparse_coo_tensor(paddle.cast(out.indices(), 'int64'), out.values(), out.shape)

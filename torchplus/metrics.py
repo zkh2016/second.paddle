@@ -1,19 +1,22 @@
 import numpy as np
-import torch
-import torch.nn.functional as F
-from torch import nn
+import paddle
+import paddle.nn.functional as F
+from paddle import nn
 
 
-class Scalar(nn.Module):
+
+class Scalar(nn.Layer):
     def __init__(self):
         super().__init__()
-        self.register_buffer('total', torch.FloatTensor([0.0]))
-        self.register_buffer('count', torch.FloatTensor([0.0]))
+        #self.register_buffer('total', torch.FloatTensor([0.0]))
+        #self.register_buffer('count', torch.FloatTensor([0.0]))
+        self.total = paddle.zeros((1,), dtype='float32')
+        self.count = paddle.zeros((1,), dtype='float32')
 
     def forward(self, scalar):
-        if not scalar.eq(0.0):
+        if not scalar.equal(0.0):
             self.count += 1
-            self.total += scalar.data.float()
+            self.total += paddle.cast(scalar, dtype='float32')
         return self.value.cpu()
 
     @property
@@ -24,15 +27,17 @@ class Scalar(nn.Module):
         self.total.zero_()
         self.count.zero_()
 
-class Accuracy(nn.Module):
+class Accuracy(nn.Layer):
     def __init__(self,
                  dim=1,
                  ignore_idx=-1,
                  threshold=0.5,
                  encode_background_as_zeros=True):
         super().__init__()
-        self.register_buffer('total', torch.FloatTensor([0.0]))
-        self.register_buffer('count', torch.FloatTensor([0.0]))
+        #self.register_buffer('total', torch.FloatTensor([0.0]))
+        #self.register_buffer('count', torch.FloatTensor([0.0]))
+        self.total = paddle.zeros((1,), dtype='float32')
+        self.count = paddle.zeros((1,), dtype='float32')
         self._ignore_idx = ignore_idx
         self._dim = dim
         self._threshold = threshold
@@ -42,24 +47,30 @@ class Accuracy(nn.Module):
         # labels: [N, ...]
         # preds: [N, C, ...]
         if self._encode_background_as_zeros:
-            scores = torch.sigmoid(preds)
-            labels_pred = torch.max(preds, dim=self._dim)[1] + 1
-            pred_labels = torch.where((scores > self._threshold).any(self._dim),
+            scores = paddle.nn.functional.sigmoid(preds)
+            labels_pred = paddle.argmax(preds, axis=self._dim) + 1
+            pred_labels = paddle.where((scores > self._threshold).any(self._dim),
                                       labels_pred,
-                                      torch.tensor(0).type_as(labels_pred))
+                                      paddle.zeros(labels_pred.shape, dtype=labels_pred.dtype))
+                                      #.type_as(labels_pred))
+            pred_labels = paddle.cast(pred_labels, labels_pred.dtype)
         else:
-            pred_labels = torch.max(preds, dim=self._dim)[1]
+            pred_labels = paddle.argmax(preds, axis=self._dim)
         N, *Ds = labels.shape
-        labels = labels.view(N, int(np.prod(Ds)))
-        pred_labels = pred_labels.view(N, int(np.prod(Ds)))
+        labels = labels.reshape((N, int(np.prod(Ds))))
+        pred_labels = pred_labels.reshape((N, int(np.prod(Ds))))
         if weights is None:
-            weights = (labels != self._ignore_idx).float()
+            weights = (labels != self._ignore_idx) #.float()
+            weights = paddle.cast(weights, dtype=paddle.float32)
         else:
-            weights = weights.float()
+            #weights = weights.float()
+            weights = paddle.cast(weights, dtype=paddle.float32)
 
-        num_examples = torch.sum(weights)
-        num_examples = torch.clamp(num_examples, min=1.0).float()
-        total = torch.sum((pred_labels == labels.long()).float())
+        num_examples = paddle.sum(weights)
+        num_examples = paddle.clip(num_examples, min=1.0) #.float()
+        num_examples = paddle.cast(num_examples, dtype='float32')
+        total = paddle.sum((pred_labels == paddle.cast(labels, dtype='int64'))) #.float())
+        total = paddle.cast(total, dtype='float32')
         self.count += num_examples
         self.total += total
         return self.value.cpu()
@@ -73,11 +84,13 @@ class Accuracy(nn.Module):
         self.count.zero_()
 
 
-class Precision(nn.Module):
+class Precision(nn.Layer):
     def __init__(self, dim=1, ignore_idx=-1, threshold=0.5):
         super().__init__()
-        self.register_buffer('total', torch.FloatTensor([0.0]))
-        self.register_buffer('count', torch.FloatTensor([0.0]))
+        #self.register_buffer('total', torch.FloatTensor([0.0]))
+        #self.register_buffer('count', torch.FloatTensor([0.0]))
+        self.total = paddle.zeros((1,), dtype='float32')
+        self.count = paddle.zeros((1,), dtype='float32')
         self._ignore_idx = ignore_idx
         self._dim = dim
         self._threshold = threshold
@@ -86,28 +99,31 @@ class Precision(nn.Module):
         # labels: [N, ...]
         # preds: [N, C, ...]
         if preds.shape[self._dim] == 1:  # BCE
-            pred_labels = (torch.sigmoid(preds) >
-                           self._threshold).long().squeeze(self._dim)
+            pred_labels = (paddle.nn.functional.sigmoid(preds) >
+                           self._threshold) #.long().squeeze(self._dim)
+            pred_labels = paddle.cast(pred_labels, dtype='int64').squeeze(self._dim)
         else:
             assert preds.shape[
                 self._dim] == 2, "precision only support 2 class"
-            pred_labels = torch.max(preds, dim=self._dim)[1]
+            pred_labels = paddle.argmax(preds, axis=self._dim)
         N, *Ds = labels.shape
-        labels = labels.view(N, int(np.prod(Ds)))
-        pred_labels = pred_labels.view(N, int(np.prod(Ds)))
+        labels = labels.reshape((N, int(np.prod(Ds))))
+        pred_labels = pred_labels.reshape((N, int(np.prod(Ds))))
         if weights is None:
-            weights = (labels != self._ignore_idx).float()
+            weights = (labels != self._ignore_idx) #.float()
+            weights = paddle.cast(weights, dtype='float32')
         else:
-            weights = weights.float()
+            #weights = weights.float()
+            weights = paddle.cast(weights, dtype='float32')
 
         pred_trues = pred_labels > 0
         pred_falses = pred_labels == 0
         trues = labels > 0
         falses = labels == 0
-        true_positives = (weights * (trues & pred_trues).float()).sum()
-        true_negatives = (weights * (falses & pred_falses).float()).sum()
-        false_positives = (weights * (falses & pred_trues).float()).sum()
-        false_negatives = (weights * (trues & pred_falses).float()).sum()
+        true_positives = paddle.cast(weights * (trues & pred_trues), dtype='float32').sum()
+        true_negatives = paddle.cast(weights * (falses & pred_falses), dtype='float32').sum()
+        false_positives = paddle.cast(weights * (falses & pred_trues), dtype='float32').sum()
+        false_negatives = paddle.cast(weights * (trues & pred_falses), dtype='float32').sum()
         count = true_positives + false_positives
         # print(count, true_positives)
         if count > 0:
@@ -123,11 +139,13 @@ class Precision(nn.Module):
         self.count.zero_()
 
 
-class Recall(nn.Module):
+class Recall(nn.Layer):
     def __init__(self, dim=1, ignore_idx=-1, threshold=0.5):
         super().__init__()
-        self.register_buffer('total', torch.FloatTensor([0.0]))
-        self.register_buffer('count', torch.FloatTensor([0.0]))
+        #self.register_buffer('total', torch.FloatTensor([0.0]))
+        #self.register_buffer('count', torch.FloatTensor([0.0]))
+        self.total = paddle.zeros((1,), dtype='float32')
+        self.count = paddle.zeros((1,), dtype='float32')
         self._ignore_idx = ignore_idx
         self._dim = dim
         self._threshold = threshold
@@ -136,27 +154,27 @@ class Recall(nn.Module):
         # labels: [N, ...]
         # preds: [N, C, ...]
         if preds.shape[self._dim] == 1:  # BCE
-            pred_labels = (torch.sigmoid(preds) >
-                           self._threshold).long().squeeze(self._dim)
+            pred_labels = paddle.cast((paddle.nn.functional.sigmoid(preds) >
+                           self._threshold), dtype='int64').squeeze(self._dim)
         else:
             assert preds.shape[
                 self._dim] == 2, "precision only support 2 class"
-            pred_labels = torch.max(preds, dim=self._dim)[1]
+            pred_labels = paddle.argmax(preds, axis=self._dim)
         N, *Ds = labels.shape
-        labels = labels.view(N, int(np.prod(Ds)))
-        pred_labels = pred_labels.view(N, int(np.prod(Ds)))
+        labels = labels.reshape((N, int(np.prod(Ds))))
+        pred_labels = pred_labels.reshape((N, int(np.prod(Ds))))
         if weights is None:
-            weights = (labels != self._ignore_idx).float()
+            weights = paddle.cast((labels != self._ignore_idx), dtype='float32')
         else:
-            weights = weights.float()
+            weights = paddle.cast(weights, dtype='float32')
         pred_trues = pred_labels == 1
         pred_falses = pred_labels == 0
         trues = labels == 1
         falses = labels == 0
-        true_positives = (weights * (trues & pred_trues).float()).sum()
-        true_negatives = (weights * (falses & pred_falses).float()).sum()
-        false_positives = (weights * (falses & pred_trues).float()).sum()
-        false_negatives = (weights * (trues & pred_falses).float()).sum()
+        true_positives = paddle.cast(weights * (trues & pred_trues), dtype='float32').sum()
+        true_negatives = paddle.cast(weights * (falses & pred_falses), dtype='float32').sum()
+        false_positives = paddle.cast(weights * (falses & pred_trues), dtype='float32').sum()
+        false_negatives = paddle.cast(weights * (trues & pred_falses), dtype='float32').sum()
         count = true_positives + false_negatives
         if count > 0:
             self.count += count
@@ -177,22 +195,22 @@ def _calc_binary_metrics(labels,
                          ignore_idx=-1,
                          threshold=0.5):
 
-    pred_labels = (scores > threshold).long()
+    pred_labels = paddle.cast((scores > threshold), dtype='int64')
     N, *Ds = labels.shape
-    labels = labels.view(N, int(np.prod(Ds)))
-    pred_labels = pred_labels.view(N, int(np.prod(Ds)))
+    labels = labels.reshape((N, int(np.prod(Ds))))
+    pred_labels = pred_labels.reshape((N, int(np.prod(Ds))))
     pred_trues = pred_labels > 0
     pred_falses = pred_labels == 0
     trues = labels > 0
     falses = labels == 0
-    true_positives = (weights * (trues & pred_trues).float()).sum()
-    true_negatives = (weights * (falses & pred_falses).float()).sum()
-    false_positives = (weights * (falses & pred_trues).float()).sum()
-    false_negatives = (weights * (trues & pred_falses).float()).sum()
+    true_positives = paddle.cast(weights * (trues & pred_trues), dtype='float32').sum()
+    true_negatives = paddle.cast(weights * (falses & pred_falses), dtype='float32').sum()
+    false_positives = paddle.cast(weights * (falses & pred_trues), dtype='float32').sum()
+    false_negatives = paddle.cast(weights * (trues & pred_falses), dtype='float32').sum()
     return true_positives, true_negatives, false_positives, false_negatives
 
 
-class PrecisionRecall(nn.Module):
+class PrecisionRecall(nn.Layer):
     def __init__(self,
                  dim=1,
                  ignore_idx=-1,
@@ -203,14 +221,18 @@ class PrecisionRecall(nn.Module):
         if not isinstance(thresholds, (list, tuple)):
             thresholds = [thresholds]
 
-        self.register_buffer('prec_total',
-                             torch.FloatTensor(len(thresholds)).zero_())
-        self.register_buffer('prec_count',
-                             torch.FloatTensor(len(thresholds)).zero_())
-        self.register_buffer('rec_total',
-                             torch.FloatTensor(len(thresholds)).zero_())
-        self.register_buffer('rec_count',
-                             torch.FloatTensor(len(thresholds)).zero_())
+        #self.register_buffer('prec_total',
+        #                     torch.FloatTensor(len(thresholds)).zero_())
+        #self.register_buffer('prec_count',
+        #                     torch.FloatTensor(len(thresholds)).zero_())
+        #self.register_buffer('rec_total',
+        #                     torch.FloatTensor(len(thresholds)).zero_())
+        #self.register_buffer('rec_count',
+        #                     torch.FloatTensor(len(thresholds)).zero_())
+        self.prec_total = paddle.zeros([len(thresholds)], dtype='float32')
+        self.prec_count = paddle.zeros([len(thresholds)], dtype='float32')
+        self.rec_total = paddle.zeros([len(thresholds)], dtype='float32')
+        self.rec_count = paddle.zeros([len(thresholds)], dtype='float32')
 
         self._ignore_idx = ignore_idx
         self._dim = dim
@@ -224,11 +246,11 @@ class PrecisionRecall(nn.Module):
         if self._encode_background_as_zeros:
             # this don't support softmax
             assert self._use_sigmoid_score is True
-            total_scores = torch.sigmoid(preds)
+            total_scores = paddle.nn.functional.sigmoid(preds)
             # scores, label_preds = torch.max(total_scores, dim=1)
         else:
             if self._use_sigmoid_score:
-                total_scores = torch.sigmoid(preds)[..., 1:]
+                total_scores = paddle.nn.functional.sigmoid(preds)[..., 1:]
             else:
                 total_scores = F.softmax(preds, dim=-1)[..., 1:]
         """
@@ -244,11 +266,13 @@ class PrecisionRecall(nn.Module):
             else:
                 scores = F.softmax(preds, dim=self._dim)[:, ..., 1:].sum(-1)
         """
-        scores = torch.max(total_scores, dim=-1)[0]
+        scores = paddle.max(total_scores, axis=-1)
         if weights is None:
-            weights = (labels != self._ignore_idx).float()
+            weights = (labels != self._ignore_idx) #.float()
+            weights = paddle.cast(weights, dtype='float32')
         else:
-            weights = weights.float()
+            #weights = weights.float()
+            weights = paddle.cast(weights, dtype='float32')
         for i, thresh in enumerate(self._thresholds):
             tp, tn, fp, fn = _calc_binary_metrics(labels, scores, weights,
                                                   self._ignore_idx, thresh)
@@ -265,8 +289,8 @@ class PrecisionRecall(nn.Module):
         # return (total /  num_examples.data).cpu()
     @property
     def value(self):
-        prec_count = torch.clamp(self.prec_count, min=1.0)
-        rec_count = torch.clamp(self.rec_count, min=1.0)
+        prec_count = paddle.clip(self.prec_count, min=1.0)
+        rec_count = paddle.clip(self.rec_count, min=1.0)
         return ((self.prec_total / prec_count).cpu(),
                 (self.rec_total / rec_count).cpu())
 

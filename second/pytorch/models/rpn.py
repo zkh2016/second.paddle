@@ -237,7 +237,6 @@ class RPNNoHeadBase(nn.Layer):
                 stride = upsample_strides[i - self._upsample_start_idx]
                 if stride >= 1:
                     stride = int(np.round(stride))
-                    print("stride = ", stride)
                     deblock = nn.Sequential(
                         nn.Conv2DTranspose(
                             num_out_filters,
@@ -405,11 +404,11 @@ class RPNV2(RPNBase):
 
         return block, planes
 
-#def test():
-#   rpn = RPNV2() 
-#   shape = [8, 128, 200, 176]
-#   x = paddle.randn(shape)
-#
-#   out = rpn(x)
+def test():
+   rpn = RPNV2() 
+   shape = [8, 128, 200, 176]
+   x = paddle.randn(shape)
+
+   out = rpn(x)
     
 #test()
