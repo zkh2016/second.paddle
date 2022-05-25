@@ -68,13 +68,13 @@ class RPN(paddle.nn.Layer):
             nn.Conv2D(
                 num_input_features, num_filters[0], 3,
                 stride=layer_strides[0], bias_attr=False),
-            nn.BatchNorm2D(num_filters[0], epsilon=1e-3, momentum=0.01),
+            #nn.BatchNorm2D(num_filters[0], epsilon=1e-3, momentum=0.01),
             nn.ReLU(),
         )
         for i in range(layer_nums[0]):
             self.block1.add(
                 nn.Conv2D(num_filters[0], num_filters[0], 3, padding=1, bias_attr=False))
-            self.block1.add(nn.BatchNorm2D(num_filters[0], epsilon=1e-3, momentum=0.01))
+            #self.block1.add(nn.BatchNorm2D(num_filters[0], epsilon=1e-3, momentum=0.01))
             self.block1.add(nn.ReLU())
         self.deconv1 = Sequential(
             nn.Conv2DTranspose(
@@ -82,7 +82,7 @@ class RPN(paddle.nn.Layer):
                 num_upsample_filters[0],
                 upsample_strides[0],
                 stride=upsample_strides[0], bias_attr=False),
-            nn.BatchNorm2D(num_upsample_filters[0], epsilon=1e-3, momentum=0.01),
+            #nn.BatchNorm2D(num_upsample_filters[0], epsilon=1e-3, momentum=0.01),
             nn.ReLU(),
         )
         self.block2 = Sequential(
@@ -92,13 +92,13 @@ class RPN(paddle.nn.Layer):
                 num_filters[1],
                 3,
                 stride=layer_strides[1], bias_attr=False),
-            nn.BatchNorm2D(num_filters[1], epsilon=1e-3, momentum=0.01),
+            #nn.BatchNorm2D(num_filters[1], epsilon=1e-3, momentum=0.01),
             nn.ReLU(),
         )
         for i in range(layer_nums[1]):
             self.block2.add(
                 nn.Conv2D(num_filters[1], num_filters[1], 3, padding=1, bias_attr=False))
-            self.block2.add(nn.BatchNorm2D(num_filters[1], epsilon=1e-3, momentum=0.01))
+            #self.block2.add(nn.BatchNorm2D(num_filters[1], epsilon=1e-3, momentum=0.01))
             self.block2.add(nn.ReLU())
         self.deconv2 = Sequential(
             nn.Conv2DTranspose(
@@ -106,19 +106,19 @@ class RPN(paddle.nn.Layer):
                 num_upsample_filters[1],
                 upsample_strides[1],
                 stride=upsample_strides[1], bias_attr=False),
-            nn.BatchNorm2D(num_upsample_filters[1], epsilon=1e-3, momentum=0.01),
+            #nn.BatchNorm2D(num_upsample_filters[1], epsilon=1e-3, momentum=0.01),
             nn.ReLU(),
         )
         self.block3 = Sequential(
             nn.Pad2D(1),
             nn.Conv2D(num_filters[1], num_filters[2], 3, stride=layer_strides[2], bias_attr=False),
-            nn.BatchNorm2D(num_filters[2], epsilon=1e-3, momentum=0.01),
+            #nn.BatchNorm2D(num_filters[2], epsilon=1e-3, momentum=0.01),
             nn.ReLU(),
         )
         for i in range(layer_nums[2]):
             self.block3.add(
                 nn.Conv2D(num_filters[2], num_filters[2], 3, padding=1, bias_attr=False))
-            self.block3.add(nn.BatchNorm2D(num_filters[2], epsilon=1e-3, momentum=0.01))
+            #self.block3.add(nn.BatchNorm2D(num_filters[2], epsilon=1e-3, momentum=0.01))
             self.block3.add(nn.ReLU())
         self.deconv3 = Sequential(
             nn.Conv2DTranspose(
@@ -126,7 +126,7 @@ class RPN(paddle.nn.Layer):
                 num_upsample_filters[2],
                 upsample_strides[2],
                 stride=upsample_strides[2], bias_attr=False),
-            nn.BatchNorm2D(num_upsample_filters[2], epsilon=1e-3, momentum=0.01),
+            #nn.BatchNorm2D(num_upsample_filters[2], epsilon=1e-3, momentum=0.01),
             nn.ReLU(),
         )
         if encode_background_as_zeros:
@@ -179,6 +179,8 @@ class RPN(paddle.nn.Layer):
         # print("rpn forward time", time.time() - t)
 
         return ret_dict
+
+flag = 1
 
 class RPNNoHeadBase(nn.Layer):
     def __init__(self,
@@ -243,10 +245,10 @@ class RPNNoHeadBase(nn.Layer):
                             num_upsample_filters[i - self._upsample_start_idx],
                             stride,
                             stride=stride, bias_attr=False),
-                        nn.BatchNorm2D(
-                            num_upsample_filters[i -
-                                                 self._upsample_start_idx],
-                                                 epsilon=1e-3, momentum=0.01),
+                        #nn.BatchNorm2D(
+                        #    num_upsample_filters[i -
+                        #                         self._upsample_start_idx],
+                        #                         epsilon=1e-3, momentum=0.01),
                         nn.ReLU(), 
                     )
                 else:
@@ -257,11 +259,11 @@ class RPNNoHeadBase(nn.Layer):
                             num_upsample_filters[i - self._upsample_start_idx],
                             stride,
                             stride=stride, bias_attr=False),
-                        nn.BatchNorm2D(
-                            num_upsample_filters[i -
-                                                 self._upsample_start_idx]),
+                        #nn.BatchNorm2D(
+                        #    num_upsample_filters[i -
+                        #                         self._upsample_start_idx],
+                        #                         epsilon=1e-3, momentum=0.01),
                         nn.ReLU(),
-                        epsilon=1e-3, momentum=0.01
                     )
                 deblocks.append(deblock)
         self._num_out_filters = num_out_filters
@@ -292,8 +294,12 @@ class RPNNoHeadBase(nn.Layer):
         res = {}
         for i, up in enumerate(ups):
             res[f"up{i}"] = up
+            if flag == 0:
+                np.save('up'+str(i), up.numpy())
         for i, out in enumerate(stage_outputs):
             res[f"stage{i}"] = out
+            if flag == 0:
+                np.save('stage'+str(i), out.numpy())
         res["out"] = x
         return res
 
@@ -358,7 +364,27 @@ class RPNBase(RPNNoHeadBase):
                 final_num_filters, num_anchor_per_loc * num_direction_bins, 1)
 
     def forward(self, x):
+        global flag
+        if flag == 0:
+            for i in range(len(self.blocks)):
+                weight = np.load('torch_blocks' + str(i)+str(0)+'_weight.npy')
+                self.blocks[i][1].weight.set_value(paddle.to_tensor(weight))
+                for j in range(int((len(self.blocks[i]) - 3) / 2)):
+                    weight = np.load('torch_blocks' + str(i)+str(j)+'_weight.npy')
+                    self.blocks[i][3 + j*2].weight.set_value(paddle.to_tensor(weight))
+            for i in range(len(self.deblocks)):
+                for j in range(int(len(self.deblocks[i])/2)):
+                    weight = np.load('torch_deblocks' + str(i)+str(j)+'_weight.npy')
+                    self.deblocks[i][j*2].weight.set_value(paddle.to_tensor(weight))
+
         res = super().forward(x)
+
+        if flag == 0:
+            np.save("rpn_out", res['out'].numpy())
+            np.save("blocks0_weight", self.blocks[0][1].weight.numpy())
+            print("save the rpnout")
+            flag = 1
+
         x = res["out"]
         box_preds = self.conv_box(x)
         cls_preds = self.conv_cls(x)
@@ -394,12 +420,12 @@ class RPNV2(RPNBase):
             #nn.ZeroPad2d(1),
             nn.Pad2D(1),
             nn.Conv2D(inplanes, planes, 3, stride=stride, bias_attr=False),
-            nn.BatchNorm2D(planes, epsilon=1e-3, momentum=0.01),
+            #nn.BatchNorm2D(planes, epsilon=1e-3, momentum=0.01),
             nn.ReLU(),
         )
         for j in range(num_blocks):
             block.add(nn.Conv2D(planes, planes, 3, padding=1, bias_attr=False))
-            block.add(nn.BatchNorm2D(planes, epsilon=1e-3, momentum=0.01))
+            #block.add(nn.BatchNorm2D(planes, epsilon=1e-3, momentum=0.01))
             block.add(nn.ReLU())
 
         return block, planes

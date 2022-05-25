@@ -173,7 +173,7 @@ def train(config_path,
           resume=False):
     """train a VoxelNet model specified by a config file.
     """
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    #device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     model_dir = str(Path(model_dir).resolve())
     if create_folder:

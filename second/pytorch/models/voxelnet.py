@@ -1,6 +1,7 @@
 import numpy as np
 import contextlib
 import paddle
+import time
 from paddle import nn
 from enum import Enum
 import torchplus
@@ -49,6 +50,8 @@ class LossNormType(Enum):
     NormByNumExamples = "norm_by_num_examples"
     NormByNumPosNeg = "norm_by_num_pos_neg"
     DontNorm = "dont_norm"
+
+flag = 1
 
 @register_voxelnet
 class VoxelNet(nn.Layer):
@@ -323,16 +326,57 @@ class VoxelNet(nn.Layer):
             }
         """
         self.start_timer("voxel_feature_extractor")
+        global flag
+        if flag == 0:
+            #np.save('vfe_in_voxels', voxels.numpy())
+            #np.save('vfe_in_coors', coors.numpy())
+            #np.save('vfe_in_num_points', num_points.numpy())
+            np_voxels = np.load('torch_vfe_in_voxels.npy')
+            np_coors = np.load('torch_vfe_in_coors.npy')
+            np_num_points = np.load('torch_vfe_in_num_points.npy')
+            voxels = paddle.to_tensor(np_voxels)
+            coors = paddle.to_tensor(np_coors)
+            num_points = paddle.to_tensor(np_num_points)
+
+        t0 = time.time()
         voxel_features = self.voxel_feature_extractor(voxels, num_points,
                                                       coors)
+
+        paddle.device.cuda.synchronize()
+        t1 = time.time()
+        print("vfe time:", t1-t0)
+
+        if flag == 0:
+            np.save('vfe_out_voxel', voxel_features.numpy())
+            print("end vfe save...")
+
         self.end_timer("voxel_feature_extractor")
 
         self.start_timer("middle forward")
+        t0 = time.time()
         spatial_features = self.middle_feature_extractor(
             voxel_features, coors, batch_size)
+        paddle.device.cuda.synchronize()
+        t1 = time.time()
+        print("middle time:", t1-t0)
+        if flag == 0:
+            np.save('spatial_features', spatial_features.numpy())
+
         self.end_timer("middle forward")
+
         self.start_timer("rpn forward")
+        t0 = time.time()
         preds_dict = self.rpn(spatial_features)
+        paddle.device.cuda.synchronize()
+        t1 = time.time()
+        print("rpn time:", t1-t0)
+        if flag == 0:
+            np.save('box_preds', preds_dict['box_preds'].numpy())
+            np.save('cls_preds', preds_dict['cls_preds'].numpy())
+            if self._use_direction_classifier:
+                np.save('dir_cls_preds', preds_dict['dir_cls_preds'].numpy())
+            flag = 1
+
         self.end_timer("rpn forward")
         #print("voxelnet forward out.shape=", preds_dict.shape)
         return preds_dict

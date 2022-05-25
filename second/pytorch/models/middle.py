@@ -19,6 +19,8 @@ def get_middle_class(name):
     assert name in REGISTERED_MIDDLE_CLASSES, f"available class: {REGISTERED_MIDDLE_CLASSES}"
     return REGISTERED_MIDDLE_CLASSES[name]
 
+flag = 1
+
 @register_middle
 class SpMiddleFHD(paddle.nn.Layer):
     def __init__(self,
@@ -97,9 +99,22 @@ class SpMiddleFHD(paddle.nn.Layer):
         #return ret
 
         #coors = paddle.cast(coors, 'int64')
+        global flag
+        if flag == 0:
+            np.save("paddle_in_features", voxel_features.numpy())
+            np.save("paddle_in_coors", coors.numpy())
+            for i in range(int(len(self.middle_conv)/2)):
+                weight = np.load("in_weight" + str(i) + ".npy")
+                self.middle_conv[i*2].weight.set_value(paddle.to_tensor(weight))
         shape = [batch_size] + list(self.sparse_shape) + [self.num_input_features]
         sp_x = sparse.sparse_coo_tensor(coors.transpose((1,0)), voxel_features, shape=shape)
         out = self.middle_conv(sp_x)
+
+        if flag == 0:
+            np.save("paddle_out_features", out.values().numpy())
+            np.save("paddle_out_coors", out.indices().numpy())
+            print("end save")
+            flag = 1
         #out = out.to_dense()
         out = sparse.sparse_coo_tensor(paddle.cast(out.indices(), 'int64'), out.values(), out.shape)
         out = out.to_dense()
