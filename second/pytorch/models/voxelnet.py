@@ -14,6 +14,10 @@ from second.pytorch.models import middle, pointpillars, rpn, voxel_encoder
 from torchplus import metrics
 from second.pytorch.utils import paddle_timer
 
+loss_flag=1
+input_count = 0
+debug = 1
+
 def _get_pos_neg_loss(cls_loss, labels):
     # cls_loss: [N, num_anchors, num_class]
     # labels: [N, num_anchors]
@@ -146,12 +150,18 @@ class VoxelNet(nn.Layer):
             voxel_size=self.voxel_generator.voxel_size,
             pc_range=self.voxel_generator.point_cloud_range,
         )
+        print("vfe:")
+        print(self.voxel_feature_extractor)
+        print(len(self.voxel_feature_extractor.parameters()))
         self.middle_feature_extractor = middle.get_middle_class(middle_class_name)(
             output_shape,
             use_norm,
             num_input_features=middle_num_input_features,
             num_filters_down1=middle_num_filters_d1,
             num_filters_down2=middle_num_filters_d2)
+        print("middle:")
+        print(self.middle_feature_extractor)
+        print(len(self.middle_feature_extractor.parameters()))
         self.rpn = rpn.get_rpn_class(rpn_class_name)(
             use_norm=True,
             num_class=num_class,
@@ -168,6 +178,9 @@ class VoxelNet(nn.Layer):
             num_groups=num_groups,
             box_code_size=target_assigner.box_coder.code_size,
             num_direction_bins=self._num_direction_bins)
+        print("rpn:")
+        print(self.rpn)
+        print(len(self.rpn.parameters()))
         self.rpn_acc = metrics.Accuracy(
             dim=-1, encode_background_as_zeros=encode_background_as_zeros)
         self.rpn_precision = metrics.Precision(dim=-1)
@@ -248,12 +261,37 @@ class VoxelNet(nn.Layer):
         reg_targets = example['reg_targets']
         importance = example['importance']
         self.start_timer("prepare weight forward")
+
+        global loss_flag
+        if loss_flag == 0:
+            torch_labels = np.load("torch_labels.npy")
+            if np.allclose(torch_labels, labels.numpy()) is False:
+                print("compare labels failed...")
+                labels = paddle.to_tensor(torch_labels)
+            torch_reg_targets = np.load("torch_reg_targets.npy")
+            if np.allclose(torch_reg_targets, reg_targets.numpy()) is False:
+                print("compare reg_targets failed...")
+                reg_targets = paddle.to_tensor(torch_reg_targets)
+            torch_importance = np.load("torch_importance.npy")
+            if np.allclose(torch_importance, importance.numpy()) is False:
+                print("compare importance failed...")
+                importance = paddle.to_tensor(torch_importance)
+
         cls_weights, reg_weights, cared = prepare_loss_weights(
             labels,
             pos_cls_weight=self._pos_cls_weight,
             neg_cls_weight=self._neg_cls_weight,
             loss_norm_type=self._loss_norm_type,
             dtype=box_preds.dtype)
+
+        if loss_flag == 0:
+            torch_cls_weights = np.load("torch_cls_weights.npy")
+            assert np.allclose(torch_cls_weights, cls_weights.numpy(), atol=1e-5, rtol=1e-5)
+            torch_reg_weights = np.load("torch_reg_weights.npy")
+            assert np.allclose(torch_reg_weights, reg_weights.numpy(), atol=1e-5, rtol=1e-5)
+            torch_cared_weight = np.load("torch_cared_weights.npy")
+            assert np.allclose(torch_cared_weight, cared.numpy(), atol=1e-5, rtol=1e-5)
+            print("compared loss weight success")
 
         cls_targets = paddle.cast(labels * cared, labels.dtype)
         cls_targets = cls_targets.unsqueeze(-1)
@@ -312,6 +350,24 @@ class VoxelNet(nn.Layer):
         }
         if self._use_direction_classifier:
             res["dir_loss_reduced"] = dir_loss
+
+        if loss_flag == 0:
+            loss_flag = 1
+            torch_cls_loss = np.load("torch_cls_loss.npy")
+            assert np.allclose(torch_cls_loss, cls_loss.numpy(), atol=1e-5, rtol=1e-5)
+            torch_loc_loss = np.load("torch_loc_loss.npy")
+            assert np.allclose(torch_loc_loss, loc_loss.numpy(), atol=1e-2, rtol=1e-2)
+            torch_cls_pos_loss = np.load("torch_cls_pos_loss.npy")
+            assert np.allclose(torch_cls_pos_loss, cls_pos_loss.numpy(), atol=1e-2, rtol=1e-2)
+            torch_cls_neg_loss = np.load("torch_cls_neg_loss.npy")
+            assert np.allclose(torch_cls_neg_loss, cls_neg_loss.numpy(), atol=1e-2, rtol=1e-2)
+            torch_loss = np.load("torch_loss.npy")
+            assert np.allclose(torch_loss, loss.numpy(), atol=1e-2, rtol=1e-2)
+            torch_cls_loss_reduced = np.load("torch_cls_loss_reduced.npy")
+            assert np.allclose(torch_cls_loss_reduced, cls_loss_reduced.numpy(), atol=1e-2, rtol=1e-2)
+            torch_loc_loss_reduced = np.load("torch_loc_loss_reduced.npy")
+            assert np.allclose(torch_loc_loss_reduced, loc_loss_reduced.numpy(), atol=1e-5, rtol=1e-5)
+            print("compare loss success")
         return res
 
     def network_forward(self, voxels, num_points, coors, batch_size):
@@ -327,16 +383,14 @@ class VoxelNet(nn.Layer):
         """
         self.start_timer("voxel_feature_extractor")
         global flag
-        if flag == 0:
-            #np.save('vfe_in_voxels', voxels.numpy())
-            #np.save('vfe_in_coors', coors.numpy())
-            #np.save('vfe_in_num_points', num_points.numpy())
-            np_voxels = np.load('torch_vfe_in_voxels.npy')
-            np_coors = np.load('torch_vfe_in_coors.npy')
-            np_num_points = np.load('torch_vfe_in_num_points.npy')
-            voxels = paddle.to_tensor(np_voxels)
-            coors = paddle.to_tensor(np_coors)
-            num_points = paddle.to_tensor(np_num_points)
+        global input_count
+        voxels.stop_gradient=False
+
+        if debug:
+            torch_voxels = np.load('./voxel/' + str(input_count) + '_voxels.npy')
+            assert np.allclose(torch_voxels, voxels.numpy(),
+            atol=1e-5, rtol=1e-5)
+            print("compare voxels " + str(input_count) + " success")
 
         t0 = time.time()
         voxel_features = self.voxel_feature_extractor(voxels, num_points,
@@ -346,39 +400,48 @@ class VoxelNet(nn.Layer):
         t1 = time.time()
         print("vfe time:", t1-t0)
 
-        if flag == 0:
-            np.save('vfe_out_voxel', voxel_features.numpy())
-            print("end vfe save...")
+        if debug:
+            torch_voxel_features = np.load('./vfe/' + str(input_count) + '_voxel_features.npy')
+            assert np.allclose(torch_voxel_features,
+            voxel_features.numpy(), atol=1e-5, rtol=1e-5)
+            print("compared voxel_features " + str(input_count) + " success")
 
         self.end_timer("voxel_feature_extractor")
 
         self.start_timer("middle forward")
         t0 = time.time()
-        spatial_features = self.middle_feature_extractor(
+        self.spatial_features = self.middle_feature_extractor(
             voxel_features, coors, batch_size)
         paddle.device.cuda.synchronize()
         t1 = time.time()
+
+        if debug:
+            torch_spatial_features = np.load('./middle/' + str(input_count) + '_spatial_features.npy')
+            assert np.allclose(torch_spatial_features, self.spatial_features.numpy(), atol=1e-3, rtol=1e-3)
+            print("compared spatial_features " + str(input_count) + " success")
+
         print("middle time:", t1-t0)
-        if flag == 0:
-            np.save('spatial_features', spatial_features.numpy())
 
         self.end_timer("middle forward")
 
         self.start_timer("rpn forward")
         t0 = time.time()
-        preds_dict = self.rpn(spatial_features)
+        preds_dict = self.rpn(self.spatial_features)
         paddle.device.cuda.synchronize()
         t1 = time.time()
         print("rpn time:", t1-t0)
-        if flag == 0:
-            np.save('box_preds', preds_dict['box_preds'].numpy())
-            np.save('cls_preds', preds_dict['cls_preds'].numpy())
-            if self._use_direction_classifier:
-                np.save('dir_cls_preds', preds_dict['dir_cls_preds'].numpy())
-            flag = 1
 
         self.end_timer("rpn forward")
         #print("voxelnet forward out.shape=", preds_dict.shape)
+
+        if debug:
+            #torch_box_preds = np.load('./rpn/' + str(input_count) + '_box_preds.npy')
+            #assert np.allclose(torch_box_preds, preds_dict['box_preds'].numpy(), atol=1e-1, rtol=1e-1)
+            #print("compared box_preds " + str(input_count) + " success")
+            torch_cls_preds = np.load('./rpn/' + str(input_count) + '_cls_preds.npy')
+            assert np.allclose(torch_cls_preds, preds_dict['cls_preds'].numpy(), atol=1e-1, rtol=1e-1)
+            print("compared cls_preds " + str(input_count) + " success")
+            input_count += 1
         return preds_dict
 
     def forward(self, example):
@@ -388,6 +451,7 @@ class VoxelNet(nn.Layer):
         num_points = example["num_points"]
         coors = example["coordinates"]
         if len(num_points.shape) == 2:  # multi-gpu
+            print("len of num_points.shape = ", len(num_points.shape))
             num_voxel_per_batch = example["num_voxels"].cpu().numpy().reshape(
                 -1)
             voxel_list = []
@@ -411,6 +475,7 @@ class VoxelNet(nn.Layer):
         err_msg = f"num_anchors={batch_anchors.shape[1]}, but num_output={box_preds.shape[1]}. please check size"
         assert batch_anchors.shape[1] == box_preds.shape[1], err_msg
         if self.training:
+            print("is training...\n")
             return self.loss(example, preds_dict)
         else:
             self.start_timer("predict")
@@ -778,6 +843,12 @@ def create_loss(loc_loss_ftor,
     cls_targets = cls_targets.squeeze(-1)
     one_hot_targets = torchplus.nn.one_hot(
         cls_targets, depth=num_class + 1, dtype=box_preds.dtype)
+    global loss_flag
+    if loss_flag == 0:
+        torch_one_hot = np.load("torch_one_hot_targets.npy")
+        if np.allclose(one_hot_targets.numpy(), torch_one_hot, atol=1e-5, rtol=1e-5) is False:
+            one_hot_targets = paddle.to_tensor(torch_one_hot)
+            print("compare one_hot failed..")
     if encode_background_as_zeros:
         one_hot_targets = one_hot_targets[..., 1:]
     if encode_rad_error_by_sin:
@@ -786,6 +857,7 @@ def create_loss(loc_loss_ftor,
         #     reg_targets[..., 6:7], 0.5, 2 * np.pi / num_direction_bins)
         box_preds, reg_targets = add_sin_difference(box_preds, reg_targets, box_preds[..., 6:7], reg_targets[..., 6:7],
                                                     sin_error_factor)
+
 
     loc_losses = loc_loss_ftor(
         box_preds, reg_targets, weights=reg_weights)  # [N, M]

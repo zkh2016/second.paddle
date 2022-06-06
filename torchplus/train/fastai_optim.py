@@ -1,6 +1,7 @@
 from collections import Iterable, defaultdict
 from copy import deepcopy
 from itertools import chain
+import numpy as np
 
 import paddle
 import torch
@@ -11,6 +12,8 @@ from torch.autograd import Variable
 
 bn_types = (nn.BatchNorm1D, nn.BatchNorm2D, nn.BatchNorm3D)
 
+param_count = 0
+debug = 0
 
 def split_bn_bias(layer_groups):
     "Split the layers in `layer_groups` into batchnorm (`bn_types`) and non-batchnorm groups."
@@ -113,6 +116,7 @@ def trainable_params(m: nn.Layer):
     for p in m.parameters():
         if not p.stop_gradient:
             res.append(p)
+    print("the len of params need grad: ", len(res))
     return res
 
 
@@ -131,19 +135,27 @@ class OptimWrapper(paddle.optimizer.Optimizer):
         self.opt_keys.remove('params')
         self.read_defaults()
         self.wd = wd
+        print("opt=", self.opt)
+        print("opt_keys=", self.opt_keys)
+        print("wd=", self.wd, "true_wd=", self.true_wd, "bn_wd=", self.bn_wd)
 
     @classmethod
     def create(cls, opt_func, lr, layer_groups, **kwargs):
         "Create an `optim.Optimizer` from `opt_func` with `lr`. Set lr on `layer_groups`."
         split_groups = split_bn_bias(layer_groups)
+        #clip = paddle.nn.ClipGradByNorm(10.0)
         opt = opt_func(parameters=[{
             'params': trainable_params(l),
             'learning_rate':0,
             'beta1':0.9,
-            'beta2':0.99
-        } for l in split_groups], learning_rate=0.0, beta1=0.9, beta2=0.99)
+            'beta2':0.99,
+            'weight_decay':0.0
+            #'grad_clip':clip
+        } for l in split_groups], learning_rate=0.0, beta1=0.9,
+        beta2=0.99, weight_decay=0.0)
         opt = cls(opt, **kwargs)
         opt.lr, opt.opt_func = listify(lr, layer_groups), opt_func
+        print("opt.lr=", opt.lr, "opt.opt_func=", opt.opt_func)
         return opt
 
     def new(self, layer_groups):
@@ -169,19 +181,53 @@ class OptimWrapper(paddle.optimizer.Optimizer):
     def step(self) -> None:
         "Set weight decay and step optimizer."
         # weight decay outside of optimizer step (AdamW)
+        print("call OptimizerWrapper step..")
+        global param_count
         if self.true_wd:
             for lr, wd, pg1, pg2 in zip(self._lr, self._wd,
                                         self.opt._param_groups[::2],
                                         self.opt._param_groups[1::2]):
+                print("opt step: wd = ", wd, " lr = ", lr, self._wd, len(pg1['params']))
                 for p in pg1['params']:
                     tmp = paddle.full(p.shape, 1-wd*lr)
+                    if debug:
+                        torch_p = np.load('./weights/before_opt_' + str(param_count) + '.npy')
+                        assert np.allclose(torch_p, p.numpy(), atol=1e-5, rtol=1e-5)
                     p.multiply(tmp)
+
+                    if debug:
+                        torch_p2 = np.load('./weights/after_opt_' + str(param_count) + '.npy')
+                        assert np.allclose(torch_p2, p.numpy(),
+                        atol=1e-6, rtol=1e-6)       
+                        param_count += 1
                 if self.bn_wd:
                     for p in pg2['params']:
                         tmp = paddle.full(p.shape, 1-wd*lr)
+                        if debug:
+                            torch_p = np.load('./weights/before_opt_' + str(param_count) + '.npy')
+                            assert np.allclose(torch_p, p.numpy(), atol=1e-5, rtol=1e-5)
                         p.multiply(tmp)
+                        if debug:
+                            torch_p2 = np.load('./weights/after_opt_' + str(param_count) + '.npy')
+                            assert np.allclose(torch_p2, p.numpy(),
+                            atol=1e-5, rtol=1e-5)
+                            param_count += 1
             self.set_val('weight_decay', listify(0, self._wd))
         self.opt.step()
+        if debug:
+            for pg1, pg2 in zip(self.opt._param_groups[::2], self.opt._param_groups[1::2]):
+                for p in pg1['params']:
+                    weight = np.load('./weights/after_opt2_' + str(param_count) + '.npy')
+                    assert np.allclose(weight, p.numpy(), atol=1e-3,
+                    rtol=1e-3)
+                    param_count += 1
+                if self.bn_wd:
+                    for p in pg2['params']:
+                        weight = np.load('./weights/after_opt2_' + str(param_count) + '.npy')
+                        assert np.allclose(weight, p.numpy(),
+                        atol=1e-3,
+                        rtol=1e-3)
+                        param_count += 1
 
     def zero_grad(self) -> None:
         "Clear optimizer gradients."
@@ -190,93 +236,124 @@ class OptimWrapper(paddle.optimizer.Optimizer):
 
     #Passthrough to the inner opt.
     def __getstate__(self):
+        print("call __getstate__ ......")
         return self.opt.__getstate__()
 
     def __setstate__(self, state):
+        print("call __setstate__ ......")
         return self.opt.__setstate__(state)
 
     def state_dict(self):
+        print("call state_dict ......")
         return self.opt.state_dict()
 
     def load_state_dict(self, state_dict):
+        print("call load_state_dict ......")
         return self.opt.load_state_dict(state_dict)
 
     def add_param_group(self, param_group):
+        print("call add_param_group......")
         return self.opt.add_param_group(param_group)
 
     def clear(self):
         "Reset the state of the inner optimizer."
+        print("call clear ......")
         sd = self.state_dict()
         sd['state'] = {}
         self.load_state_dict(sd)
 
     @property
     def param_groups(self):
+        print("call param_groups......")
         return self.opt._param_groups
 
     @property
     def defaults(self):
+        print("call defaults......")
         return self.opt.defaults
 
     @property
     def state(self):
+        print("call state......")
         return self.opt.state
 
 
     #Hyperparameters as properties
     @property
     def lr(self) -> float:
-        return self._lr[-1]
+        print("call lr....")
+        #return self._lr[-1]
+        return self.opt.get_lr()
 
     @lr.setter
     def lr(self, val: float) -> None:
+        print("call set_lr....")
         self._lr = self.set_val('learning_rate', listify(val, self._lr))
+        #self._lr = val
+        print('set lr = ', val)
+        #self.opt._learning_rate = val
+        if isinstance(val, float):
+            self.opt.set_lr(val)
+        else:
+            self.opt.set_lr(val[0])
 
     @property
     def mom(self) -> float:
+        print("call mom....")
         return self._mom[-1]
 
     @mom.setter
     def mom(self, val: float) -> None:
+        print("call set mom....")
         if 'momentum' in self.opt_keys:
             self.set_val('momentum', listify(val, self._mom))
         #elif 'betas' in self.opt_keys:
         #    self.set_val('betas', (listify(val, self._mom), self._beta))
         elif 'beta1' in self.opt_keys:
             self.set_val('beta1', listify(val, self._mom))
-        elif 'beta2' in self.opt_keys:
-            self.set_val('beta2', listify(val, self._beta))
+        #elif 'beta2' in self.opt_keys:
+        #    self.set_val('beta2', listify(val, self._beta))
         self._mom = listify(val, self._mom)
+        print('set beta1 = ', val)
+        self.opt._beta1=val
 
     @property
     def beta(self) -> float:
+        print("call beta...")
         return None if self._beta is None else self._beta[-1]
 
     @beta.setter
     def beta(self, val: float) -> None:
         "Set beta (or alpha as makes sense for given optimizer)."
+        print("call set beta...")
         if val is None: return
         #if 'betas' in self.opt_keys:
         #    self.set_val('betas', (self._mom, listify(val, self._beta)))
-        if 'beta1' in self.opt_keys:
-            self.set_val('beta1', listify(val, self._mom))
+        #if 'beta1' in self.opt_keys:
+        #    self.set_val('beta1', listify(val, self._mom))
         if 'beta2' in self.opt_keys:
             self.set_val('beta2', listify(val, self._beta))
         elif 'alpha' in self.opt_keys:
             self.set_val('alpha', listify(val, self._beta))
         self._beta = listify(val, self._beta)
+        print('set beta2 = ', val)
+        self.opt._beta2=val
 
     @property
     def wd(self) -> float:
+        print("call wd...")
         return self._wd[-1]
 
     @wd.setter
     def wd(self, val: float) -> None:
         "Set weight decay."
+        print("call set wd...")
         if not self.true_wd:
             self.set_val(
                 'weight_decay', listify(val, self._wd), bn_groups=self.bn_wd)
         self._wd = listify(val, self._wd)
+        print('set wd = ', val)
+        #self.opt.regularization=val
 
     #Helper functions
     def read_defaults(self) -> None:
@@ -295,6 +372,8 @@ class OptimWrapper(paddle.optimizer.Optimizer):
             self._beta = self.read_val('beta2')
         if 'weight_decay' in self.opt_keys:
             self._wd = self.read_val('weight_decay')
+        print("read_defaults:")
+        print("lr=", self._lr, "mom=", self._mom, "beta=", self._beta, "wd=", self._wd) 
 
     def set_val(self, key: str, val, bn_groups: bool = True):
         "Set `val` inside the optimizer dictionary at `key`."
@@ -342,6 +421,7 @@ class FastAIMixedOptim(OptimWrapper):
         return opt
 
     def step(self):
+        print("call fastai_optim.py step()")
         model_g2master_g(self.model_params, self.master_params,
                          self.flat_master)
         for group in self.master_params:

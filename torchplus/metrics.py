@@ -8,10 +8,10 @@ from paddle import nn
 class Scalar(nn.Layer):
     def __init__(self):
         super().__init__()
-        #self.register_buffer('total', torch.FloatTensor([0.0]))
-        #self.register_buffer('count', torch.FloatTensor([0.0]))
-        self.total = paddle.zeros((1,), dtype='float32')
-        self.count = paddle.zeros((1,), dtype='float32')
+        self.register_buffer('total', paddle.zeros((1,)))
+        self.register_buffer('count', paddle.zeros((1,)))
+        #self.total = paddle.zeros((1,), dtype='float32')
+        #self.count = paddle.zeros((1,), dtype='float32')
 
     def forward(self, scalar):
         if not scalar.equal(0.0):
@@ -34,10 +34,10 @@ class Accuracy(nn.Layer):
                  threshold=0.5,
                  encode_background_as_zeros=True):
         super().__init__()
-        #self.register_buffer('total', torch.FloatTensor([0.0]))
-        #self.register_buffer('count', torch.FloatTensor([0.0]))
-        self.total = paddle.zeros((1,), dtype='float32')
-        self.count = paddle.zeros((1,), dtype='float32')
+        self.register_buffer('total', paddle.zeros((1,)))
+        self.register_buffer('count', paddle.zeros((1,)))
+        #self.total = paddle.zeros((1,), dtype='float32')
+        #self.count = paddle.zeros((1,), dtype='float32')
         self._ignore_idx = ignore_idx
         self._dim = dim
         self._threshold = threshold
@@ -73,6 +73,7 @@ class Accuracy(nn.Layer):
         total = paddle.cast(total, dtype='float32')
         self.count += num_examples
         self.total += total
+        print("total = ", self.total.numpy()[0], " count=", self.count.numpy()[0])
         return self.value.cpu()
         # return (total /  num_examples.data).cpu()
     @property
@@ -87,10 +88,10 @@ class Accuracy(nn.Layer):
 class Precision(nn.Layer):
     def __init__(self, dim=1, ignore_idx=-1, threshold=0.5):
         super().__init__()
-        #self.register_buffer('total', torch.FloatTensor([0.0]))
-        #self.register_buffer('count', torch.FloatTensor([0.0]))
-        self.total = paddle.zeros((1,), dtype='float32')
-        self.count = paddle.zeros((1,), dtype='float32')
+        self.register_buffer('total', paddle.zeros((1,)))
+        self.register_buffer('count', paddle.zeros((1,)))
+        #self.total = paddle.zeros((1,), dtype='float32')
+        #self.count = paddle.zeros((1,), dtype='float32')
         self._ignore_idx = ignore_idx
         self._dim = dim
         self._threshold = threshold
@@ -142,10 +143,10 @@ class Precision(nn.Layer):
 class Recall(nn.Layer):
     def __init__(self, dim=1, ignore_idx=-1, threshold=0.5):
         super().__init__()
-        #self.register_buffer('total', torch.FloatTensor([0.0]))
-        #self.register_buffer('count', torch.FloatTensor([0.0]))
-        self.total = paddle.zeros((1,), dtype='float32')
-        self.count = paddle.zeros((1,), dtype='float32')
+        self.register_buffer('total', paddle.zeros((1,)))
+        self.register_buffer('count', paddle.zeros((1,)))
+        #self.total = paddle.zeros((1,), dtype='float32')
+        #self.count = paddle.zeros((1,), dtype='float32')
         self._ignore_idx = ignore_idx
         self._dim = dim
         self._threshold = threshold
@@ -221,18 +222,18 @@ class PrecisionRecall(nn.Layer):
         if not isinstance(thresholds, (list, tuple)):
             thresholds = [thresholds]
 
-        #self.register_buffer('prec_total',
-        #                     torch.FloatTensor(len(thresholds)).zero_())
-        #self.register_buffer('prec_count',
-        #                     torch.FloatTensor(len(thresholds)).zero_())
-        #self.register_buffer('rec_total',
-        #                     torch.FloatTensor(len(thresholds)).zero_())
-        #self.register_buffer('rec_count',
-        #                     torch.FloatTensor(len(thresholds)).zero_())
-        self.prec_total = paddle.zeros([len(thresholds)], dtype='float32')
-        self.prec_count = paddle.zeros([len(thresholds)], dtype='float32')
-        self.rec_total = paddle.zeros([len(thresholds)], dtype='float32')
-        self.rec_count = paddle.zeros([len(thresholds)], dtype='float32')
+        self.register_buffer('prec_total',
+                             paddle.zeros([len(thresholds)]))
+        self.register_buffer('prec_count',
+                             paddle.zeros([len(thresholds)]))
+        self.register_buffer('rec_total',
+                             paddle.zeros([len(thresholds)]))
+        self.register_buffer('rec_count',
+                             paddle.zeros([len(thresholds)]))
+        #self.prec_total = paddle.zeros([len(thresholds)], dtype='float32')
+        #self.prec_count = paddle.zeros([len(thresholds)], dtype='float32')
+        #self.rec_total = paddle.zeros([len(thresholds)], dtype='float32')
+        #self.rec_count = paddle.zeros([len(thresholds)], dtype='float32')
 
         self._ignore_idx = ignore_idx
         self._dim = dim

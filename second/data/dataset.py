@@ -26,7 +26,8 @@ def get_dataset_class(name):
     return REGISTERED_DATASET_CLASSES[name]
 
 
-class Dataset(paddle.io.Dataset):
+#class Dataset(paddle.io.Dataset):
+class Dataset(object):
     """An abstract class representing a pytorch-like Dataset.
     All other datasets should subclass it. All subclasses should override
     ``__len__``, that provides the size of the dataset, and ``__getitem__``,

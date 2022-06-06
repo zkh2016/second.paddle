@@ -278,9 +278,9 @@ class RPNNoHeadBase(nn.Module):
                             num_upsample_filters[i - self._upsample_start_idx],
                             stride,
                             stride=stride),
-                        BatchNorm2d(
-                            num_upsample_filters[i -
-                                                 self._upsample_start_idx]),
+                        #BatchNorm2d(
+                        #    num_upsample_filters[i -
+                        #                         self._upsample_start_idx]),
                         nn.ReLU(),
                     )
                 else:
@@ -291,9 +291,9 @@ class RPNNoHeadBase(nn.Module):
                             num_upsample_filters[i - self._upsample_start_idx],
                             stride,
                             stride=stride),
-                        BatchNorm2d(
-                            num_upsample_filters[i -
-                                                 self._upsample_start_idx]),
+                        #BatchNorm2d(
+                        #    num_upsample_filters[i -
+                        #                         self._upsample_start_idx]),
                         nn.ReLU(),
                     )
                 deblocks.append(deblock)
@@ -386,13 +386,29 @@ class RPNBase(RPNNoHeadBase):
         self.conv_cls = nn.Conv2d(final_num_filters, num_cls, 1)
         self.conv_box = nn.Conv2d(final_num_filters,
                                   num_anchor_per_loc * box_code_size, 1)
+        print("final_num_filters=", final_num_filters, num_anchor_per_loc * box_code_size)
         if use_direction_classifier:
             self.conv_dir_cls = nn.Conv2d(
                 final_num_filters, num_anchor_per_loc * num_direction_bins, 1)
 
     def forward(self, x):
+        for i in range(len(self.blocks)):
+            np.save("torch_blocks" + str(i)+str(0) + "_weight", self.blocks[i][1].weight.data.detach().cpu().numpy())
+            for j in range(int((len(self.blocks[i])-3)/2)):
+                np.save("torch_blocks" + str(i)+str(j+1) + "_weight", self.blocks[i][3 + j*2].weight.data.detach().cpu().numpy())
+        for i in range(len(self.deblocks)):
+            for j in range(int(len(self.deblocks[i])/2)):
+                np.save("torch_deblocks" + str(i)+str(j)+"_weight", self.deblocks[i][j*2].weight.data.detach().cpu().numpy())
+                    
         res = super().forward(x)
         x = res["out"]
+
+        np.save('torch_rpn_out', x.detach().cpu().numpy())
+        np.save("torch_conv_box_weight", self.conv_box.weight.data.detach().cpu().numpy())
+        np.save("torch_conv_box_bias", self.conv_box.bias.data.detach().cpu().numpy())
+        np.save("torch_conv_cls_weight", self.conv_cls.weight.data.detach().cpu().numpy())
+        np.save("torch_conv_cls_bias", self.conv_cls.bias.data.detach().cpu().numpy())
+
         box_preds = self.conv_box(x)
         cls_preds = self.conv_cls(x)
         # [N, C, y(H), x(W)]
@@ -410,6 +426,10 @@ class RPNBase(RPNNoHeadBase):
             "box_preds": box_preds,
             "cls_preds": cls_preds,
         }
+
+        np.save("torch_rpn_box_preds", box_preds.detach().cpu().numpy())
+        np.save("torch_rpn_cls_preds", cls_preds.detach().cpu().numpy())
+
         if self._use_direction_classifier:
             dir_cls_preds = self.conv_dir_cls(x)
             dir_cls_preds = dir_cls_preds.view(
@@ -419,50 +439,6 @@ class RPNBase(RPNNoHeadBase):
             ret_dict["dir_cls_preds"] = dir_cls_preds
         return ret_dict
 
-
-def conv1x1(in_planes, out_planes, stride=1):
-    """1x1 convolution"""
-    return nn.Conv2d(
-        in_planes, out_planes, kernel_size=1, stride=stride, bias=False)
-
-@register_rpn
-class ResNetRPN(RPNBase):
-    def __init__(self, *args, **kw):
-        self.inplanes = -1
-        super(ResNetRPN, self).__init__(*args, **kw)
-        for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(
-                    m.weight, mode='fan_out', nonlinearity='relu')
-            elif isinstance(m, nn.BatchNorm2d):
-                nn.init.constant_(m.weight, 1)
-                nn.init.constant_(m.bias, 0)
-
-        # if zero_init_residual:
-        for m in self.modules():
-            if isinstance(m, resnet.Bottleneck):
-                nn.init.constant_(m.bn3.weight, 0)
-            elif isinstance(m, resnet.BasicBlock):
-                nn.init.constant_(m.bn2.weight, 0)
-
-    def _make_layer(self, inplanes, planes, num_blocks, stride=1):
-        if self.inplanes == -1:
-            self.inplanes = self._num_input_features
-        block = resnet.BasicBlock
-        downsample = None
-        if stride != 1 or self.inplanes != planes * block.expansion:
-            downsample = nn.Sequential(
-                conv1x1(self.inplanes, planes * block.expansion, stride),
-                nn.BatchNorm2d(planes * block.expansion),
-            )
-
-        layers = []
-        layers.append(block(self.inplanes, planes, stride, downsample))
-        self.inplanes = planes * block.expansion
-        for _ in range(1, num_blocks):
-            layers.append(block(self.inplanes, planes))
-
-        return nn.Sequential(*layers), self.inplanes
 
 @register_rpn
 class RPNV2(RPNBase):
@@ -486,44 +462,23 @@ class RPNV2(RPNBase):
         block = Sequential(
             nn.ZeroPad2d(1),
             Conv2d(inplanes, planes, 3, stride=stride),
-            BatchNorm2d(planes),
+            #BatchNorm2d(planes),
             nn.ReLU(),
         )
         for j in range(num_blocks):
             block.add(Conv2d(planes, planes, 3, padding=1))
-            block.add(BatchNorm2d(planes))
+            #block.add(BatchNorm2d(planes))
             block.add(nn.ReLU())
 
         return block, planes
 
-@register_rpn
-class RPNNoHead(RPNNoHeadBase):
-    def _make_layer(self, inplanes, planes, num_blocks, stride=1):
-        if self._use_norm:
-            if self._use_groupnorm:
-                BatchNorm2d = change_default_args(
-                    num_groups=self._num_groups, eps=1e-3)(GroupNorm)
-            else:
-                BatchNorm2d = change_default_args(
-                    eps=1e-3, momentum=0.01)(nn.BatchNorm2d)
-            Conv2d = change_default_args(bias=False)(nn.Conv2d)
-            ConvTranspose2d = change_default_args(bias=False)(
-                nn.ConvTranspose2d)
-        else:
-            BatchNorm2d = Empty
-            Conv2d = change_default_args(bias=True)(nn.Conv2d)
-            ConvTranspose2d = change_default_args(bias=True)(
-                nn.ConvTranspose2d)
 
-        block = Sequential(
-            nn.ZeroPad2d(1),
-            Conv2d(inplanes, planes, 3, stride=stride),
-            BatchNorm2d(planes),
-            nn.ReLU(),
-        )
-        for j in range(num_blocks):
-            block.add(Conv2d(planes, planes, 3, padding=1))
-            block.add(BatchNorm2d(planes))
-            block.add(nn.ReLU())
+def test():
+    device=torch.device("cuda")
+    spatial_features = np.load("torch_spatial_features.npy")
+    spatial_features = torch.tensor(spatial_features, device=device)
+    rpn = RPNV2()
+    rpn.to(device)
+    out = rpn(spatial_features)
 
-        return block, planes
+test()

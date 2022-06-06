@@ -10,6 +10,7 @@ import fire
 import numpy as np
 import torch
 import paddle
+from paddle.fluid.framework import _test_eager_guard
 from google.protobuf import text_format
 
 import second.data.kitti_common as kitti
@@ -24,6 +25,9 @@ from second.pytorch.builder import (box_coder_builder, input_reader_builder,
 from second.utils.log_tool import SimpleModelLog
 from second.utils.progress_bar import ProgressBar
 import psutil
+
+flag = 1
+debug = 1
 
 def example_convert_to_torch(example, dtype=torch.float32,
                              device=None) -> dict:
@@ -161,7 +165,7 @@ def train(config_path,
           model_dir,
           result_path=None,
           create_folder=False,
-          display_step=50,
+          display_step=1,
           summary_step=5,
           pretrained_path=None,
           pretrained_include=None,
@@ -171,298 +175,382 @@ def train(config_path,
           multi_gpu=False,
           measure_time=False,
           resume=False):
-    """train a VoxelNet model specified by a config file.
-    """
-    #device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
-    model_dir = str(Path(model_dir).resolve())
-    if create_folder:
-        if Path(model_dir).exists():
-            model_dir = torchplus.train.create_folder(model_dir)
-    model_dir = Path(model_dir)
-    if not resume and model_dir.exists():
-        raise ValueError("model dir exists and you don't specify resume.")
-    model_dir.mkdir(parents=True, exist_ok=True)
-    if result_path is None:
-        result_path = model_dir / 'results'
-    config_file_bkp = "pipeline.config"
-    if isinstance(config_path, str):
-        # directly provide a config object. this usually used
-        # when you want to train with several different parameters in
-        # one script.
-        config = pipeline_pb2.TrainEvalPipelineConfig()
-        with open(config_path, "r") as f:
-            proto_str = f.read()
-            text_format.Merge(proto_str, config)
-    else:
-        config = config_path
-        proto_str = text_format.MessageToString(config, indent=2)
-    with (model_dir / config_file_bkp).open("w") as f:
-        f.write(proto_str)
+    with _test_eager_guard():
+        """train a VoxelNet model specified by a config file.
+        """
+        #device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        
+        model_dir = str(Path(model_dir).resolve())
+        if create_folder:
+            if Path(model_dir).exists():
+                model_dir = torchplus.train.create_folder(model_dir)
+        model_dir = Path(model_dir)
+        if not resume and model_dir.exists():
+            raise ValueError("model dir exists and you don't specify resume.")
+        model_dir.mkdir(parents=True, exist_ok=True)
+        if result_path is None:
+            result_path = model_dir / 'results'
+        config_file_bkp = "pipeline.config"
+        if isinstance(config_path, str):
+            # directly provide a config object. this usually used
+            # when you want to train with several different parameters in
+            # one script.
+            config = pipeline_pb2.TrainEvalPipelineConfig()
+            with open(config_path, "r") as f:
+                proto_str = f.read()
+                text_format.Merge(proto_str, config)
+        else:
+            config = config_path
+            proto_str = text_format.MessageToString(config, indent=2)
+        with (model_dir / config_file_bkp).open("w") as f:
+            f.write(proto_str)
 
-    input_cfg = config.train_input_reader
-    eval_input_cfg = config.eval_input_reader
-    model_cfg = config.model.second
-    train_cfg = config.train_config
+        input_cfg = config.train_input_reader
+        eval_input_cfg = config.eval_input_reader
+        model_cfg = config.model.second
+        train_cfg = config.train_config
 
-    #net = build_network(model_cfg, measure_time).to(device)
-    net = build_network(model_cfg, measure_time)
-    # if train_cfg.enable_mixed_precision:
-    #     net.half()
-    #     net.metrics_to_float()
-    #     net.convert_norm_to_float(net)
-    target_assigner = net.target_assigner
-    voxel_generator = net.voxel_generator
-    #torchplus.train.try_restore_latest_checkpoints(model_dir, [net])
-    if pretrained_path is not None:
-        model_dict = net.state_dict()
-        pretrained_dict = torch.load(pretrained_path)
-        pretrained_dict = filter_param_dict(pretrained_dict, pretrained_include, pretrained_exclude)
-        new_pretrained_dict = {}
-        for k, v in pretrained_dict.items():
-            if k in model_dict and v.shape == model_dict[k].shape:
-                new_pretrained_dict[k] = v        
-        model_dict.update(new_pretrained_dict) 
-        net.load_state_dict(model_dict)
-        freeze_params_v2(dict(net.named_parameters()), freeze_include, freeze_exclude)
-        net.clear_global_step()
-        net.clear_metrics()
-    if multi_gpu:
-        net_parallel = paddle.DataParallel(net)
-    else:
-        net_parallel = net
-    optimizer_cfg = train_cfg.optimizer
-    loss_scale = train_cfg.loss_scale_factor
-    fastai_optimizer = optimizer_builder.build(
-        optimizer_cfg,
-        net,
-        mixed=False,
-        loss_scale=loss_scale)
-    if loss_scale < 0:
-        loss_scale = "dynamic"
-    if train_cfg.enable_mixed_precision:
-        max_num_voxels = input_cfg.preprocess.max_number_of_voxels * input_cfg.batch_size
-        assert max_num_voxels < 65535, "spconv fp16 training only support this"
-        from apex import amp
-        net, amp_optimizer = amp.initialize(net, fastai_optimizer,
-                                        opt_level="O2",
-                                        keep_batchnorm_fp32=True,
-                                        loss_scale=loss_scale
-                                        )
-        net.metrics_to_float()
-    else:
-        amp_optimizer = fastai_optimizer
-    #torchplus.train.try_restore_latest_checkpoints(model_dir,
-    #                                               [fastai_optimizer])
-    lr_scheduler = lr_scheduler_builder.build(optimizer_cfg, amp_optimizer,
-                                              train_cfg.steps)
-    if train_cfg.enable_mixed_precision:
-        float_dtype = paddle.float16
-    else:
-        float_dtype = paddle.float32
+        #net = build_network(model_cfg, measure_time).to(device)
+        net = build_network(model_cfg, measure_time)
+        # if train_cfg.enable_mixed_precision:
+        #     net.half()
+        #     net.metrics_to_float()
+        #     net.convert_norm_to_float(net)
+        target_assigner = net.target_assigner
+        voxel_generator = net.voxel_generator
+        #torchplus.train.try_restore_latest_checkpoints(model_dir, [net])
+        if pretrained_path is not None:
+            model_dict = net.state_dict()
+            pretrained_dict = torch.load(pretrained_path)
+            pretrained_dict = filter_param_dict(pretrained_dict, pretrained_include, pretrained_exclude)
+            new_pretrained_dict = {}
+            for k, v in pretrained_dict.items():
+                if k in model_dict and v.shape == model_dict[k].shape:
+                    new_pretrained_dict[k] = v        
+            model_dict.update(new_pretrained_dict) 
+            net.load_state_dict(model_dict)
+            freeze_params_v2(dict(net.named_parameters()), freeze_include, freeze_exclude)
+            net.clear_global_step()
+            net.clear_metrics()
+        if multi_gpu:
+            net_parallel = paddle.DataParallel(net)
+        else:
+            net_parallel = net
+        optimizer_cfg = train_cfg.optimizer
+        loss_scale = train_cfg.loss_scale_factor
+        fastai_optimizer = optimizer_builder.build(
+            optimizer_cfg,
+            net,
+            mixed=False,
+            loss_scale=loss_scale)
+        if loss_scale < 0:
+            loss_scale = "dynamic"
+        if train_cfg.enable_mixed_precision:
+            max_num_voxels = input_cfg.preprocess.max_number_of_voxels * input_cfg.batch_size
+            assert max_num_voxels < 65535, "spconv fp16 training only support this"
+            from apex import amp
+            net, amp_optimizer = amp.initialize(net, fastai_optimizer,
+                                            opt_level="O2",
+                                            keep_batchnorm_fp32=True,
+                                            loss_scale=loss_scale
+                                            )
+            net.metrics_to_float()
+        else:
+            amp_optimizer = fastai_optimizer
+        #torchplus.train.try_restore_latest_checkpoints(model_dir,
+        #                                               [fastai_optimizer])
+        lr_scheduler = lr_scheduler_builder.build(optimizer_cfg, amp_optimizer,
+                                                  train_cfg.steps)
+        if train_cfg.enable_mixed_precision:
+            float_dtype = paddle.float16
+        else:
+            float_dtype = paddle.float32
 
-    if multi_gpu:
-        num_gpu = torch.cuda.device_count()
-        print(f"MULTI-GPU: use {num_gpu} gpu")
-        collate_fn = merge_second_batch_multigpu
-    else:
-        collate_fn = merge_second_batch
-        num_gpu = 1
+        if multi_gpu:
+            num_gpu = torch.cuda.device_count()
+            print(f"MULTI-GPU: use {num_gpu} gpu")
+            collate_fn = merge_second_batch_multigpu
+        else:
+            collate_fn = merge_second_batch
+            num_gpu = 1
 
-    ######################
-    # PREPARE INPUT
-    ######################
-    dataset = input_reader_builder.build(
-        input_cfg,
-        model_cfg,
-        training=True,
-        voxel_generator=voxel_generator,
-        target_assigner=target_assigner,
-        multi_gpu=multi_gpu)
-    eval_dataset = input_reader_builder.build(
-        eval_input_cfg,
-        model_cfg,
-        training=False,
-        voxel_generator=voxel_generator,
-        target_assigner=target_assigner)
+        ######################
+        # PREPARE INPUT
+        ######################
+        dataset = input_reader_builder.build(
+            input_cfg,
+            model_cfg,
+            training=True,
+            voxel_generator=voxel_generator,
+            target_assigner=target_assigner,
+            multi_gpu=multi_gpu)
+        eval_dataset = input_reader_builder.build(
+            eval_input_cfg,
+            model_cfg,
+            training=False,
+            voxel_generator=voxel_generator,
+            target_assigner=target_assigner)
 
-    dataloader = torch.utils.data.DataLoader(
-    #dataloader = paddle.io.DataLoader(
-        dataset,
-        batch_size=input_cfg.batch_size * num_gpu,
-        shuffle=True,
-        num_workers=1,#input_cfg.preprocess.num_workers * num_gpu,
-        pin_memory=False,
-        #use_shared_memory=False,
-        collate_fn=collate_fn,
-        worker_init_fn=_worker_init_fn,
-        drop_last=not multi_gpu)
-    eval_dataloader = torch.utils.data.DataLoader(
-    #eval_dataloader = paddle.io.DataLoader(
-        eval_dataset,
-        batch_size=eval_input_cfg.batch_size, # only support multi-gpu train
-        shuffle=False,
-        num_workers=1,#eval_input_cfg.preprocess.num_workers,
-        pin_memory=False,
-        #use_shared_memory=False,
-        collate_fn=merge_second_batch)
+        dataloader = torch.utils.data.DataLoader(
+        #dataloader = paddle.io.DataLoader(
+            dataset,
+            batch_size=input_cfg.batch_size * num_gpu,
+            shuffle=True,
+            num_workers=1,#input_cfg.preprocess.num_workers * num_gpu,
+            pin_memory=False,
+            #use_shared_memory=False,
+            collate_fn=collate_fn,
+            #worker_init_fn=_worker_init_fn,
+            drop_last=not multi_gpu)
+        eval_dataloader = torch.utils.data.DataLoader(
+        #eval_dataloader = paddle.io.DataLoader(
+            eval_dataset,
+            batch_size=eval_input_cfg.batch_size, # only support multi-gpu train
+            shuffle=False,
+            num_workers=1,#eval_input_cfg.preprocess.num_workers,
+            pin_memory=False,
+            #use_shared_memory=False,
+            collate_fn=merge_second_batch)
 
-    ######################
-    # TRAINING
-    ######################
-    model_logging = SimpleModelLog(model_dir)
-    model_logging.open()
-    model_logging.log_text(proto_str + "\n", 0, tag="config")
-    start_step = net.get_global_step()
-    total_step = train_cfg.steps
-    t = time.time()
-    steps_per_eval = train_cfg.steps_per_eval
-    clear_metrics_every_epoch = train_cfg.clear_metrics_every_epoch
+        ######################
+        # TRAINING
+        ######################
+        model_logging = SimpleModelLog(model_dir)
+        model_logging.open()
+        model_logging.log_text(proto_str + "\n", 0, tag="config")
+        start_step = net.get_global_step()
+        total_step = train_cfg.steps
+        t = time.time()
+        steps_per_eval = train_cfg.steps_per_eval
+        clear_metrics_every_epoch = train_cfg.clear_metrics_every_epoch
 
-    amp_optimizer.zero_grad()
-    step_times = []
-    step = start_step
-    try:
-        while True:
-            if clear_metrics_every_epoch:
-                net.clear_metrics()
-            for example in dataloader:
-
-                lr_scheduler.step(net.get_global_step())
-                time_metrics = example["metrics"]
-                example.pop("metrics")
-                #example_torch = example_convert_to_torch(example, float_dtype)
-                example_paddle = example_convert_to_paddle(example, float_dtype)
-
-                batch_size = example["anchors"].shape[0]
-
-                ret_dict = net_parallel(example_paddle)
-                cls_preds = ret_dict["cls_preds"]
-                loss = ret_dict["loss"].mean()
-                cls_loss_reduced = ret_dict["cls_loss_reduced"].mean()
-                loc_loss_reduced = ret_dict["loc_loss_reduced"].mean()
-                cls_pos_loss = ret_dict["cls_pos_loss"].mean()
-                cls_neg_loss = ret_dict["cls_neg_loss"].mean()
-                loc_loss = ret_dict["loc_loss"]
-                cls_loss = ret_dict["cls_loss"]
+        amp_optimizer.zero_grad()
+        step_times = []
+        step = start_step
+        global flag
+        try:
+            while True:
+                if clear_metrics_every_epoch:
+                    net.clear_metrics()
+                input_count = 0
+                for example in dataloader:
+                    if debug:
+                        base_dir = './inputs/' + str(input_count) + '_'
+                        torch_labels = np.load(base_dir + "torch_labels.npy")
+                        torch_voxels = np.load(base_dir + "torch_voxels.npy")
+                        torch_importance = np.load(base_dir + "torch_importance.npy")
+                        torch_num_points = np.load(base_dir + "torch_numpoints.npy")
+                        torch_coordinates = np.load(base_dir + "torch_coordinates.npy")
+                        torch_num_voxels = np.load(base_dir + "torch_numvoxels.npy")
+                        #torch_metrics = np.load("torch_metrics.npy")
+                        torch_anchors = np.load(base_dir + "torch_anchors.npy")
+                        torch_gt_names = np.load(base_dir + "torch_gt_names.npy")
+                        torch_reg_targets = np.load(base_dir + "torch_reg_targets.npy")
+                        example['labels'] = torch_labels
+                        example['importance'] = torch_importance
+                        example['voxels'] = torch_voxels 
+                        example['num_points'] = torch_num_points 
+                        example['coordinates'] = torch_coordinates
+                        example['num_voxels'] = torch_num_voxels
+                        #example['metrics'] = torch_metrics 
+                        example['anchors'] = torch_anchors
+                        example['gt_names'] = torch_gt_names
+                        example['reg_targets'] = torch_reg_targets 
                 
-                cared = ret_dict["cared"]
-                labels = example_paddle["labels"]
-                if train_cfg.enable_mixed_precision:
-                    with amp.scale_loss(loss, amp_optimizer) as scaled_loss:
-                        scaled_loss.backward()
-                else:
-                    loss.backward()
-                #torch.nn.utils.clip_grad_norm_(net.parameters(), 10.0)
-                #clip_norm = paddle.nn.ClipGradByNorm(clip_norm=10.0)
-                #clip_norm(net.parameters())
-                amp_optimizer.step()
-                amp_optimizer.zero_grad()
-                net.update_global_step()
-                net_metrics = net.update_metrics(cls_loss_reduced,
-                                                 loc_loss_reduced, cls_preds,
-                                                 labels, cared)
+                    if flag == 0:
+                        torch_conv_weight = np.load('torch_conv_box_weight.npy')
+                        conv_weight = net.rpn.conv_box.weight.numpy()
+                        assert np.allclose(torch_conv_weight, conv_weight, atol=1e-3, rtol=1e-3)
+                        torch_blocks_weight = np.load('torch_blocks00_weight.npy')
+                        blocks_weight = net.rpn.blocks[0][1].weight.numpy()
+                        print(net.rpn.blocks[0][1].weight.name)
+                        assert np.allclose(torch_blocks_weight, blocks_weight, atol=1e-3, rtol=1e-3)
+                        torch_middle_weight = np.load('torch_middle_weight0.npy')
+                        middle_weight = net.middle_feature_extractor.middle_conv[0].weight.numpy()
+                        assert np.allclose(torch_middle_weight, middle_weight, atol=1e-3, rtol=1e-3)
+                        print("compare weight before forward success")
 
-                step_time = (time.time() - t)
-                step_times.append(step_time)
-                t = time.time()
-                metrics = {}
-                num_pos = int(paddle.cast((labels > 0)[0], dtype='float32').sum().numpy())
-                num_neg = int(paddle.cast((labels == 0)[0], dtype='float32').sum().numpy())
-                if 'anchors_mask' not in example_paddle:
-                    num_anchors = example_paddle['anchors'].shape[1]
-                else:
-                    num_anchors = int(example_paddle['anchors_mask'][0].sum())
-                global_step = net.get_global_step()
+                    lr_scheduler.step(net.get_global_step())
+                    time_metrics = example["metrics"]
+                    example.pop("metrics")
+                    #example_torch = example_convert_to_torch(example, float_dtype)
+                    example_paddle = example_convert_to_paddle(example, float_dtype)
 
-                if global_step % display_step == 0:
-                    if measure_time:
-                        for name, val in net.get_avg_time_dict().items():
-                            print(f"avg {name} time = {val * 1000:.3f} ms")
+                    batch_size = example_paddle["anchors"].shape[0]
+                    paddle.device.cuda.synchronize()
 
-                    loc_loss_elem = [
-                        float(loc_loss[:, :, i].sum().detach().numpy() /
-                              batch_size) for i in range(loc_loss.shape[-1])
-                    ]
-                    metrics["runtime"] = {
-                        "step": global_step,
-                        "steptime": np.mean(step_times),
-                    }
-                    metrics["runtime"].update(time_metrics[0])
-                    step_times = []
-                    metrics.update(net_metrics)
-                    metrics["loss"]["loc_elem"] = loc_loss_elem
-                    metrics["loss"]["cls_pos_rt"] = float(
-                        cls_pos_loss.detach().numpy())
-                    metrics["loss"]["cls_neg_rt"] = float(
-                        cls_neg_loss.detach().numpy())
-                    if model_cfg.use_direction_classifier:
-                        dir_loss_reduced = ret_dict["dir_loss_reduced"].mean()
-                        metrics["loss"]["dir_rt"] = float(
-                            dir_loss_reduced.detach().numpy())
+                    t0 = time.time()
+                    ret_dict = net_parallel(example_paddle)
+                    cls_preds = ret_dict["cls_preds"]
+                    loss = ret_dict["loss"].mean()
+                    cls_loss_reduced = ret_dict["cls_loss_reduced"].mean()
+                    loc_loss_reduced = ret_dict["loc_loss_reduced"].mean()
+                    cls_pos_loss = ret_dict["cls_pos_loss"].mean()
+                    cls_neg_loss = ret_dict["cls_neg_loss"].mean()
+                    loc_loss = ret_dict["loc_loss"]
+                    cls_loss = ret_dict["cls_loss"]
+                    
+                    cared = ret_dict["cared"]
+                    labels = example_paddle["labels"]
 
-                    metrics["misc"] = {
-                        "num_vox": int(example_paddle["voxels"].shape[0]),
-                        "num_pos": int(num_pos),
-                        "num_neg": int(num_neg),
-                        "num_anchors": int(num_anchors),
-                        "lr": float(amp_optimizer.lr),
-                        "mem_usage": psutil.virtual_memory().percent,
-                    }
-                    model_logging.log_metrics(metrics, global_step)
+                    if debug:
+                        loss_dir = './loss_dir/' + str(input_count) + '_'
+                        torch_cls_preds = np.load(loss_dir + 'torch_cls_preds.npy')
+                        torch_cls_loss_reduces = np.load(loss_dir + 'torch_cls_loss_reduced.npy')
+                        assert np.allclose(torch_cls_loss_reduces, cls_loss_reduced.numpy(), atol=1e-3, rtol=1e-3)
+                        assert np.allclose(torch_cls_preds, cls_preds.numpy(), atol=1e-3, rtol=1e-3)
+                        print("verify loss success...")
+                        input_count += 1
 
-                if global_step % steps_per_eval == 0:
-                    torchplus.train.save_models(model_dir, [net, amp_optimizer],
-                                                net.get_global_step())
-                    net.eval()
-                    result_path_step = result_path / f"step_{net.get_global_step()}"
-                    result_path_step.mkdir(parents=True, exist_ok=True)
-                    model_logging.log_text("#################################",
-                                        global_step)
-                    model_logging.log_text("# EVAL", global_step)
-                    model_logging.log_text("#################################",
-                                        global_step)
-                    model_logging.log_text("Generate output labels...", global_step)
+                    paddle.device.cuda.synchronize()
+                    t1 = time.time()
+                    if train_cfg.enable_mixed_precision:
+                        with amp.scale_loss(loss, amp_optimizer) as scaled_loss:
+                            scaled_loss.backward()
+                    else:
+                        loss.backward()
+                    paddle.device.cuda.synchronize()
+                    t2 = time.time()
+                    print("forward time = ", t1-t0, "backward time = ", t2-t1)
+
+                    if flag == 0:
+                        grad = net.rpn.conv_box.weight.grad.numpy()
+                        torch_grad = np.load('torch_conv_box_weight_grad.npy')
+                        assert np.allclose(grad, torch_grad, atol=1e-5, rtol=1e-5) 
+
+                        torch_blocks_weight = np.load('torch_blocks_weight_grad.npy')
+                        blocks_weight = net.rpn.blocks[0][1].weight.grad.numpy()
+                        assert np.allclose(torch_blocks_weight, blocks_weight, atol=1e-5, rtol=1e-5)
+                        middle_grad = net.middle_feature_extractor.middle_conv[0].weight.grad.numpy()
+                        torch_middle_grad = np.load('torch_middle_weight.npy')
+                        assert np.allclose(middle_grad, torch_middle_grad, atol=1e-5, rtol=1e-5) 
+                        print("compare grad success..")
+                        
+                    #torch.nn.utils.clip_grad_norm_(net.parameters(), 10.0)
+                    #clip_norm = paddle.nn.ClipGradByNorm(clip_norm=10.0)
+                    #clip_norm(net.parameters())
+                    #amp_optimizer.step()
+                    #amp_optimizer.zero_grad()
+                    net.update_global_step()
+                    if flag == 0:
+                        flag = 1
+                        torch_conv_weight = np.load('torch_conv_box_weight_opt.npy')
+                        conv_weight = net.rpn.conv_box.weight.numpy()
+                        assert np.allclose(torch_conv_weight, conv_weight, atol=1e-3, rtol=1e-3)
+                        torch_blocks_weight = np.load('torch_blocks_weight_opt.npy')
+                        blocks_weight = net.rpn.blocks[0][1].weight.numpy()
+                        assert np.allclose(torch_blocks_weight, blocks_weight, atol=1e-3, rtol=1e-3)
+                        torch_middle_weight = np.load('torch_middle_weight_opt.npy')
+                        middle_weight = net.middle_feature_extractor.middle_conv[0].weight.numpy()
+                        assert np.allclose(torch_middle_weight, middle_weight, atol=1e-3, rtol=1e-3)
+                        print("compare weight after opt success")
+                    paddle.device.cuda.synchronize()
+                    t3 = time.time()
+                    print("optmizer time = ", t3-t2)
+                    net_metrics = net.update_metrics(cls_loss_reduced,
+                                                     loc_loss_reduced, cls_preds,
+                                                     labels, cared)
+
+                    step_time = (time.time() - t)
+                    step_times.append(step_time)
                     t = time.time()
-                    detections = []
-                    prog_bar = ProgressBar()
-                    net.clear_timer()
-                    prog_bar.start((len(eval_dataset) + eval_input_cfg.batch_size - 1)
-                                // eval_input_cfg.batch_size)
-                    for example in iter(eval_dataloader):
-                        example = example_convert_to_torch(example, float_dtype)
-                        detections += net(example)
-                        prog_bar.print_bar()
+                    metrics = {}
+                    num_pos = int(paddle.cast((labels > 0)[0], dtype='float32').sum().numpy())
+                    num_neg = int(paddle.cast((labels == 0)[0], dtype='float32').sum().numpy())
+                    if 'anchors_mask' not in example_paddle:
+                        num_anchors = example_paddle['anchors'].shape[1]
+                    else:
+                        num_anchors = int(example_paddle['anchors_mask'][0].sum())
+                    global_step = net.get_global_step()
 
-                    sec_per_ex = len(eval_dataset) / (time.time() - t)
-                    model_logging.log_text(
-                        f'generate label finished({sec_per_ex:.2f}/s). start eval:',
-                        global_step)
-                    #result_dict = eval_dataset.dataset.evaluation(
-                    #    detections, str(result_path_step))
-                    #for k, v in result_dict["results"].items():
-                    #    model_logging.log_text("Evaluation {}".format(k), global_step)
-                    #    model_logging.log_text(v, global_step)
-                    #model_logging.log_metrics(result_dict["detail"], global_step)
-                    #with open(result_path_step / "result.pkl", 'wb') as f:
-                    #    pickle.dump(detections, f)
-                    net.train()
-                step += 1
+                    if global_step % display_step == 0:
+                        if measure_time:
+                            for name, val in net.get_avg_time_dict().items():
+                                print(f"avg {name} time = {val * 1000:.3f} ms")
+
+                        loc_loss_elem = [
+                            float(loc_loss[:, :, i].sum().numpy() /
+                                  batch_size) for i in range(loc_loss.shape[-1])
+                        ]
+                        metrics["runtime"] = {
+                            "step": global_step,
+                            "steptime": np.mean(step_times),
+                        }
+                        metrics["runtime"].update(time_metrics[0])
+                        step_times = []
+                        metrics.update(net_metrics)
+                        metrics["loss"]["loc_elem"] = loc_loss_elem
+                        metrics["loss"]["cls_pos_rt"] = float(
+                            cls_pos_loss.numpy())
+                        metrics["loss"]["cls_neg_rt"] = float(
+                            cls_neg_loss.numpy())
+                        if model_cfg.use_direction_classifier:
+                            dir_loss_reduced = ret_dict["dir_loss_reduced"].mean()
+                            metrics["loss"]["dir_rt"] = float(
+                                dir_loss_reduced.numpy())
+
+                        metrics["misc"] = {
+                            "num_vox": int(example_paddle["voxels"].shape[0]),
+                            "num_pos": int(num_pos),
+                            "num_neg": int(num_neg),
+                            "num_anchors": int(num_anchors),
+                            "lr": float(amp_optimizer.lr),
+                            "mem_usage": psutil.virtual_memory().percent,
+                        }
+                        model_logging.log_metrics(metrics, global_step)
+
+                    if global_step % steps_per_eval == 0:
+                        torchplus.train.save_models(model_dir, [net, amp_optimizer],
+                                                    net.get_global_step())
+                        net.eval()
+                        result_path_step = result_path / f"step_{net.get_global_step()}"
+                        result_path_step.mkdir(parents=True, exist_ok=True)
+                        model_logging.log_text("#################################",
+                                            global_step)
+                        model_logging.log_text("# EVAL", global_step)
+                        model_logging.log_text("#################################",
+                                            global_step)
+                        model_logging.log_text("Generate output labels...", global_step)
+                        t = time.time()
+                        detections = []
+                        prog_bar = ProgressBar()
+                        net.clear_timer()
+                        prog_bar.start((len(eval_dataset) + eval_input_cfg.batch_size - 1)
+                                    // eval_input_cfg.batch_size)
+                        for example in iter(eval_dataloader):
+                            example = example_convert_to_torch(example, float_dtype)
+                            detections += net(example)
+                            prog_bar.print_bar()
+
+                        sec_per_ex = len(eval_dataset) / (time.time() - t)
+                        model_logging.log_text(
+                            f'generate label finished({sec_per_ex:.2f}/s). start eval:',
+                            global_step)
+                        #result_dict = eval_dataset.dataset.evaluation(
+                        #    detections, str(result_path_step))
+                        #for k, v in result_dict["results"].items():
+                        #    model_logging.log_text("Evaluation {}".format(k), global_step)
+                        #    model_logging.log_text(v, global_step)
+                        #model_logging.log_metrics(result_dict["detail"], global_step)
+                        #with open(result_path_step / "result.pkl", 'wb') as f:
+                        #    pickle.dump(detections, f)
+                        net.train()
+                    step += 1
+                    if step >= total_step:
+                        break
                 if step >= total_step:
                     break
-            if step >= total_step:
-                break
-    except Exception as e:
-        print(json.dumps(example["metadata"], indent=2))
-        model_logging.log_text(str(e), step)
-        model_logging.log_text(json.dumps(example["metadata"], indent=2), step)
+        except Exception as e:
+            print(json.dumps(example["metadata"], indent=2))
+            model_logging.log_text(str(e), step)
+            model_logging.log_text(json.dumps(example["metadata"], indent=2), step)
+            torchplus.train.save_models(model_dir, [net, amp_optimizer],
+                                        step)
+            raise e
+        finally:
+            model_logging.close()
         torchplus.train.save_models(model_dir, [net, amp_optimizer],
-                                    step)
-        raise e
-    finally:
-        model_logging.close()
-    torchplus.train.save_models(model_dir, [net, amp_optimizer],
-                                net.get_global_step())
+                                    net.get_global_step())
 
 
 def evaluate(config_path,
