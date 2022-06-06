@@ -417,7 +417,8 @@ class VoxelNet(nn.Layer):
 
         if debug:
             torch_spatial_features = np.load('./middle/' + str(input_count) + '_spatial_features.npy')
-            assert np.allclose(torch_spatial_features, self.spatial_features.numpy(), atol=1e-3, rtol=1e-3)
+            assert np.allclose(torch_spatial_features, self.spatial_features.numpy(), atol=1e-5,
+            rtol=1e-5)
             print("compared spatial_features " + str(input_count) + " success")
 
         print("middle time:", t1-t0)
@@ -439,7 +440,8 @@ class VoxelNet(nn.Layer):
             #assert np.allclose(torch_box_preds, preds_dict['box_preds'].numpy(), atol=1e-1, rtol=1e-1)
             #print("compared box_preds " + str(input_count) + " success")
             torch_cls_preds = np.load('./rpn/' + str(input_count) + '_cls_preds.npy')
-            assert np.allclose(torch_cls_preds, preds_dict['cls_preds'].numpy(), atol=1e-1, rtol=1e-1)
+            assert np.allclose(torch_cls_preds, preds_dict['cls_preds'].numpy(), atol=1e-5,
+            rtol=1e-5)
             print("compared cls_preds " + str(input_count) + " success")
             input_count += 1
         return preds_dict

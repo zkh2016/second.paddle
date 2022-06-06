@@ -397,8 +397,9 @@ def train(config_path,
                         loss_dir = './loss_dir/' + str(input_count) + '_'
                         torch_cls_preds = np.load(loss_dir + 'torch_cls_preds.npy')
                         torch_cls_loss_reduces = np.load(loss_dir + 'torch_cls_loss_reduced.npy')
-                        assert np.allclose(torch_cls_loss_reduces, cls_loss_reduced.numpy(), atol=1e-3, rtol=1e-3)
-                        assert np.allclose(torch_cls_preds, cls_preds.numpy(), atol=1e-3, rtol=1e-3)
+                        assert np.allclose(torch_cls_loss_reduces, cls_loss_reduced.numpy(),
+                        atol=1e-5, rtol=1e-5)
+                        assert np.allclose(torch_cls_preds, cls_preds.numpy(), atol=1e-5, rtol=1e-5)
                         print("verify loss success...")
                         input_count += 1
 
