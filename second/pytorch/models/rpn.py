@@ -6,6 +6,7 @@ from paddle.nn import functional as F
 from .common import Sequential
 
 REGISTERED_RPN_CLASSES = {}
+debug = 0
 
 def register_rpn(cls, name=None):
     global REGISTERED_RPN_CLASSES
@@ -362,42 +363,43 @@ class RPNBase(RPNNoHeadBase):
                 final_num_filters, num_anchor_per_loc * num_direction_bins, 1)
 
         #for debug
-        for i in range(len(self.blocks)):
-            weight = np.load('torch_blocks' + str(i)+str(0)+'_weight.npy')
-            self.blocks[i][1].weight.set_value(paddle.to_tensor(weight, stop_gradient=False))
-            weight2 = np.load('torch_blocks' + str(i)+str(1)+'_weight.npy')
-            self.blocks[i][2].weight.set_value(paddle.to_tensor(weight2, stop_gradient=False))
-            bias = np.load('torch_blocks' + str(i)+str(1)+'_bias.npy')
-            self.blocks[i][2].bias.set_value(paddle.to_tensor(bias, stop_gradient=False))
-            for j in range(int((len(self.blocks[i]) - 4) / 3)):
-                weight = np.load('torch_blocks' + str(i)+str(2+2*j+0)+'_weight.npy')
-                weight2 = np.load('torch_blocks' + str(i)+str(2+2*j+1)+'_weight.npy')
-                bias = np.load('torch_blocks' + str(i)+str(2+2*j+1)+'_bias.npy')
-                self.blocks[i][4 + j*3].weight.set_value(paddle.to_tensor(weight, stop_gradient=False))
-                self.blocks[i][4 + j*3+1].weight.set_value(paddle.to_tensor(weight2, stop_gradient=False))
-                self.blocks[i][4 + j*3+1].bias.set_value(paddle.to_tensor(bias, stop_gradient=False))
-        for i in range(len(self.deblocks)):
-            for j in range(int(len(self.deblocks[i])/3)):
-                weight = np.load('torch_deblocks' + str(i)+str(2*j)+'_weight.npy')
-                weight2 = np.load('torch_deblocks' + str(i)+str(2*j+1)+'_weight.npy')
-                bias = np.load('torch_deblocks' + str(i)+str(2*j+1)+'_bias.npy')
-                self.deblocks[i][j*3].weight.set_value(paddle.to_tensor(weight, stop_gradient=False))
-                self.deblocks[i][j*3+1].weight.set_value(paddle.to_tensor(weight2, stop_gradient=False))
-                self.deblocks[i][j*3+1].bias.set_value(paddle.to_tensor(bias, stop_gradient=False))
+        if debug:
+            for i in range(len(self.blocks)):
+                weight = np.load('torch_blocks' + str(i)+str(0)+'_weight.npy')
+                self.blocks[i][1].weight.set_value(paddle.to_tensor(weight, stop_gradient=False))
+                weight2 = np.load('torch_blocks' + str(i)+str(1)+'_weight.npy')
+                self.blocks[i][2].weight.set_value(paddle.to_tensor(weight2, stop_gradient=False))
+                bias = np.load('torch_blocks' + str(i)+str(1)+'_bias.npy')
+                self.blocks[i][2].bias.set_value(paddle.to_tensor(bias, stop_gradient=False))
+                for j in range(int((len(self.blocks[i]) - 4) / 3)):
+                    weight = np.load('torch_blocks' + str(i)+str(2+2*j+0)+'_weight.npy')
+                    weight2 = np.load('torch_blocks' + str(i)+str(2+2*j+1)+'_weight.npy')
+                    bias = np.load('torch_blocks' + str(i)+str(2+2*j+1)+'_bias.npy')
+                    self.blocks[i][4 + j*3].weight.set_value(paddle.to_tensor(weight, stop_gradient=False))
+                    self.blocks[i][4 + j*3+1].weight.set_value(paddle.to_tensor(weight2, stop_gradient=False))
+                    self.blocks[i][4 + j*3+1].bias.set_value(paddle.to_tensor(bias, stop_gradient=False))
+            for i in range(len(self.deblocks)):
+                for j in range(int(len(self.deblocks[i])/3)):
+                    weight = np.load('torch_deblocks' + str(i)+str(2*j)+'_weight.npy')
+                    weight2 = np.load('torch_deblocks' + str(i)+str(2*j+1)+'_weight.npy')
+                    bias = np.load('torch_deblocks' + str(i)+str(2*j+1)+'_bias.npy')
+                    self.deblocks[i][j*3].weight.set_value(paddle.to_tensor(weight, stop_gradient=False))
+                    self.deblocks[i][j*3+1].weight.set_value(paddle.to_tensor(weight2, stop_gradient=False))
+                    self.deblocks[i][j*3+1].bias.set_value(paddle.to_tensor(bias, stop_gradient=False))
 
-        conv_box_weight = np.load("torch_conv_box_weight.npy")
-        conv_box_bias = np.load("torch_conv_box_bias.npy")
-        conv_cls_weight = np.load("torch_conv_cls_weight.npy")
-        conv_cls_bias = np.load("torch_conv_cls_bias.npy")
-        self.conv_box.weight.set_value(paddle.to_tensor(conv_box_weight, stop_gradient=False))
-        self.conv_box.bias.set_value(paddle.to_tensor(conv_box_bias, stop_gradient=False))
-        self.conv_cls.weight.set_value(paddle.to_tensor(conv_cls_weight, stop_gradient=False))
-        self.conv_cls.bias.set_value(paddle.to_tensor(conv_cls_bias, stop_gradient=False))
-        if self._use_direction_classifier:
-            conv_dir_cls_weight = np.load("torch_conv_dir_cls_weight.npy")
-            conv_dir_cls_bias = np.load("torch_conv_dir_cls_bias.npy")
-            self.conv_dir_cls.weight.set_value(paddle.to_tensor(conv_dir_cls_weight, stop_gradient=False))
-            self.conv_dir_cls.bias.set_value(paddle.to_tensor(conv_dir_cls_bias, stop_gradient=False))
+            conv_box_weight = np.load("torch_conv_box_weight.npy")
+            conv_box_bias = np.load("torch_conv_box_bias.npy")
+            conv_cls_weight = np.load("torch_conv_cls_weight.npy")
+            conv_cls_bias = np.load("torch_conv_cls_bias.npy")
+            self.conv_box.weight.set_value(paddle.to_tensor(conv_box_weight, stop_gradient=False))
+            self.conv_box.bias.set_value(paddle.to_tensor(conv_box_bias, stop_gradient=False))
+            self.conv_cls.weight.set_value(paddle.to_tensor(conv_cls_weight, stop_gradient=False))
+            self.conv_cls.bias.set_value(paddle.to_tensor(conv_cls_bias, stop_gradient=False))
+            if self._use_direction_classifier:
+                conv_dir_cls_weight = np.load("torch_conv_dir_cls_weight.npy")
+                conv_dir_cls_bias = np.load("torch_conv_dir_cls_bias.npy")
+                self.conv_dir_cls.weight.set_value(paddle.to_tensor(conv_dir_cls_weight, stop_gradient=False))
+                self.conv_dir_cls.bias.set_value(paddle.to_tensor(conv_dir_cls_bias, stop_gradient=False))
 
     def forward(self, x):
         global flag

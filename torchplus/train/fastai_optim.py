@@ -143,15 +143,16 @@ class OptimWrapper(paddle.optimizer.Optimizer):
     def create(cls, opt_func, lr, layer_groups, **kwargs):
         "Create an `optim.Optimizer` from `opt_func` with `lr`. Set lr on `layer_groups`."
         split_groups = split_bn_bias(layer_groups)
-        #clip = paddle.nn.ClipGradByNorm(10.0)
+        clip = paddle.nn.ClipGradByNorm(10.0)
         opt = opt_func(parameters=[{
             'params': trainable_params(l),
-            'learning_rate':0,
+            #default lr
+            'learning_rate':1.0,
             'beta1':0.9,
             'beta2':0.99,
-            'weight_decay':0.0
-            #'grad_clip':clip
-        } for l in split_groups], learning_rate=0.0, beta1=0.9,
+            'weight_decay':0.0,
+            'grad_clip':clip
+        } for l in split_groups], learning_rate=1.0, beta1=0.9,
         beta2=0.99, weight_decay=0.0)
         opt = cls(opt, **kwargs)
         opt.lr, opt.opt_func = listify(lr, layer_groups), opt_func
@@ -183,16 +184,23 @@ class OptimWrapper(paddle.optimizer.Optimizer):
         # weight decay outside of optimizer step (AdamW)
         print("call OptimizerWrapper step..")
         global param_count
+        counts = []
+        index = 0
         if self.true_wd:
             for lr, wd, pg1, pg2 in zip(self._lr, self._wd,
                                         self.opt._param_groups[::2],
                                         self.opt._param_groups[1::2]):
                 print("opt step: wd = ", wd, " lr = ", lr, self._wd, len(pg1['params']))
                 for p in pg1['params']:
+                    #p.optimize_attr['learning_rate'] = lr
                     tmp = paddle.full(p.shape, 1-wd*lr)
                     if debug:
+                        counts.append(param_count)
                         torch_p = np.load('./weights/before_opt_' + str(param_count) + '.npy')
+                        torch_p_grad = np.load('./weights/grad_before_opt_' + str(param_count) + '.npy')
                         assert np.allclose(torch_p, p.numpy(), atol=1e-5, rtol=1e-5)
+                        assert np.allclose(torch_p_grad, p.grad.numpy(), atol=1e-5, rtol=1e-5)
+
                     p.multiply(tmp)
 
                     if debug:
@@ -200,27 +208,39 @@ class OptimWrapper(paddle.optimizer.Optimizer):
                         assert np.allclose(torch_p2, p.numpy(),
                         atol=1e-6, rtol=1e-6)       
                         param_count += 1
+                        index += 1
+
                 if self.bn_wd:
                     for p in pg2['params']:
                         tmp = paddle.full(p.shape, 1-wd*lr)
                         if debug:
                             torch_p = np.load('./weights/before_opt_' + str(param_count) + '.npy')
                             assert np.allclose(torch_p, p.numpy(), atol=1e-5, rtol=1e-5)
+
                         p.multiply(tmp)
+
                         if debug:
                             torch_p2 = np.load('./weights/after_opt_' + str(param_count) + '.npy')
                             assert np.allclose(torch_p2, p.numpy(),
                             atol=1e-5, rtol=1e-5)
                             param_count += 1
+                            index += 1
             self.set_val('weight_decay', listify(0, self._wd))
         self.opt.step()
         if debug:
+            index = 0
             for pg1, pg2 in zip(self.opt._param_groups[::2], self.opt._param_groups[1::2]):
                 for p in pg1['params']:
+                    #before_opt = np.load('./weights/after_opt_' + str(counts[index]) + '.npy')
+                    #optmizer is not effective
+                    #assert np.allclose(before_opt, p.numpy())
+                    #print('the param is same as befor opti')
+
                     weight = np.load('./weights/after_opt2_' + str(param_count) + '.npy')
-                    assert np.allclose(weight, p.numpy(), atol=1e-3,
-                    rtol=1e-3)
+                    assert np.allclose(weight, p.numpy(), atol=1e-5, rtol=1e-5)
+                    print("compare ", index, "weight after opt success")
                     param_count += 1
+                    index += 1
                 if self.bn_wd:
                     for p in pg2['params']:
                         weight = np.load('./weights/after_opt2_' + str(param_count) + '.npy')
@@ -228,6 +248,7 @@ class OptimWrapper(paddle.optimizer.Optimizer):
                         atol=1e-3,
                         rtol=1e-3)
                         param_count += 1
+                        index += 1
 
     def zero_grad(self) -> None:
         "Clear optimizer gradients."
@@ -306,6 +327,7 @@ class OptimWrapper(paddle.optimizer.Optimizer):
     def mom(self, val: float) -> None:
         print("call set mom....")
         if 'momentum' in self.opt_keys:
+            print("set momentum...")
             self.set_val('momentum', listify(val, self._mom))
         #elif 'betas' in self.opt_keys:
         #    self.set_val('betas', (listify(val, self._mom), self._beta))
@@ -314,7 +336,6 @@ class OptimWrapper(paddle.optimizer.Optimizer):
         #elif 'beta2' in self.opt_keys:
         #    self.set_val('beta2', listify(val, self._beta))
         self._mom = listify(val, self._mom)
-        print('set beta1 = ', val)
         self.opt._beta1=val
 
     @property

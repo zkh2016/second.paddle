@@ -27,7 +27,7 @@ from second.utils.progress_bar import ProgressBar
 import psutil
 
 flag = 1
-debug = 1
+debug = 0
 
 def example_convert_to_torch(example, dtype=torch.float32,
                              device=None) -> dict:
@@ -397,8 +397,7 @@ def train(config_path,
                         loss_dir = './loss_dir/' + str(input_count) + '_'
                         torch_cls_preds = np.load(loss_dir + 'torch_cls_preds.npy')
                         torch_cls_loss_reduces = np.load(loss_dir + 'torch_cls_loss_reduced.npy')
-                        assert np.allclose(torch_cls_loss_reduces, cls_loss_reduced.numpy(),
-                        atol=1e-5, rtol=1e-5)
+                        assert np.allclose(torch_cls_loss_reduces, cls_loss_reduced.numpy(), atol=1e-5, rtol=1e-5)
                         assert np.allclose(torch_cls_preds, cls_preds.numpy(), atol=1e-5, rtol=1e-5)
                         print("verify loss success...")
                         input_count += 1
@@ -428,10 +427,8 @@ def train(config_path,
                         print("compare grad success..")
                         
                     #torch.nn.utils.clip_grad_norm_(net.parameters(), 10.0)
-                    #clip_norm = paddle.nn.ClipGradByNorm(clip_norm=10.0)
-                    #clip_norm(net.parameters())
-                    #amp_optimizer.step()
-                    #amp_optimizer.zero_grad()
+                    amp_optimizer.step()
+                    amp_optimizer.zero_grad()
                     net.update_global_step()
                     if flag == 0:
                         flag = 1

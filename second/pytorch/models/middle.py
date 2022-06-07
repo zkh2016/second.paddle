@@ -1,10 +1,12 @@
 import numpy as np
 
 import paddle
-from paddle import sparse
+from paddle.incubate import sparse
+from paddle.incubate.sparse import nn 
 import time
 
 REGISTERED_MIDDLE_CLASSES = {}
+debug = 0
 
 def register_middle(cls, name=None):
     global REGISTERED_MIDDLE_CLASSES
@@ -41,61 +43,62 @@ class SpMiddleFHD(paddle.nn.Layer):
         # input: # [1600, 1200, 41]
         print("num_input_features=", num_input_features)
         self.middle_conv = paddle.nn.Sequential(
-            sparse.SubmConv3D(num_input_features, 16, 3), 
-            #sparse.BatchNorm(16, epsilon=1e-3, momentum=0.01),
-            sparse.ReLU(),
+            nn.SubmConv3D(num_input_features, 16, 3), 
+            #nn.BatchNorm(16, epsilon=1e-3, momentum=0.01),
+            nn.ReLU(),
 
-            sparse.SubmConv3D(16, 16, 3),
-            #sparse.BatchNorm(16, epsilon=1e-3, momentum=0.01),
-            sparse.ReLU(),
+            nn.SubmConv3D(16, 16, 3),
+            #nn.BatchNorm(16, epsilon=1e-3, momentum=0.01),
+            nn.ReLU(),
 
-            sparse.Conv3D(16, 32, 3, 2, padding=1),  # [1600, 1200, 41] -> [800, 600, 21]
-            #sparse.BatchNorm(32, epsilon=1e-3, momentum=0.01),
-            sparse.ReLU(),
+            nn.Conv3D(16, 32, 3, 2, padding=1),  # [1600, 1200, 41] -> [800, 600, 21]
+            #nn.BatchNorm(32, epsilon=1e-3, momentum=0.01),
+            nn.ReLU(),
 
-            sparse.SubmConv3D(32, 32, 3),
-            #sparse.BatchNorm(32, epsilon=1e-3, momentum=0.01),
-            sparse.ReLU(),
+            nn.SubmConv3D(32, 32, 3),
+            #nn.BatchNorm(32, epsilon=1e-3, momentum=0.01),
+            nn.ReLU(),
 
-            sparse.SubmConv3D(32, 32, 3),
-            #sparse.BatchNorm(32, epsilon=1e-3, momentum=0.01),
-            sparse.ReLU(),
+            nn.SubmConv3D(32, 32, 3),
+            #nn.BatchNorm(32, epsilon=1e-3, momentum=0.01),
+            nn.ReLU(),
 
-            sparse.Conv3D(32, 64, 3, 2, padding=1),  # [800, 600, 21] -> [400, 300, 11]
-            #sparse.BatchNorm(64, epsilon=1e-3, momentum=0.01),
-            sparse.ReLU(),
-            sparse.SubmConv3D(64, 64, 3),
-            #sparse.BatchNorm(64, epsilon=1e-3, momentum=0.01),
-            sparse.ReLU(),
-            sparse.SubmConv3D(64, 64, 3),
-            #sparse.BatchNorm(64, epsilon=1e-3, momentum=0.01),
-            sparse.ReLU(),
-            sparse.SubmConv3D(64, 64, 3),
-            #sparse.BatchNorm(64, epsilon=1e-3, momentum=0.01),
-            sparse.ReLU(),
-            sparse.Conv3D(64, 64, 3, 2, padding=[0, 1, 1]),  # [400, 300, 11] -> [200, 150, 5]
-            #sparse.BatchNorm(64, epsilon=1e-3, momentum=0.01),
-            sparse.ReLU(),
-            sparse.SubmConv3D(64, 64, 3),
-            #sparse.BatchNorm(64, epsilon=1e-3, momentum=0.01),
-            sparse.ReLU(),
-            sparse.SubmConv3D(64, 64, 3),
-            #sparse.BatchNorm(64, epsilon=1e-3, momentum=0.01),
-            sparse.ReLU(),
-            sparse.SubmConv3D(64, 64, 3), 
-            #sparse.BatchNorm(64, epsilon=1e-3, momentum=0.01),
-            sparse.ReLU(),
-            sparse.Conv3D(64, 64, (3, 1, 1), (2, 1, 1)),  # [200, 150, 5] -> [200, 150, 2]
-            #sparse.BatchNorm(64, epsilon=1e-3, momentum=0.01),
-            sparse.ReLU(),
+            nn.Conv3D(32, 64, 3, 2, padding=1),  # [800, 600, 21] -> [400, 300, 11]
+            #nn.BatchNorm(64, epsilon=1e-3, momentum=0.01),
+            nn.ReLU(),
+            nn.SubmConv3D(64, 64, 3),
+            #nn.BatchNorm(64, epsilon=1e-3, momentum=0.01),
+            nn.ReLU(),
+            nn.SubmConv3D(64, 64, 3),
+            #nn.BatchNorm(64, epsilon=1e-3, momentum=0.01),
+            nn.ReLU(),
+            nn.SubmConv3D(64, 64, 3),
+            #nn.BatchNorm(64, epsilon=1e-3, momentum=0.01),
+            nn.ReLU(),
+            nn.Conv3D(64, 64, 3, 2, padding=[0, 1, 1]),  # [400, 300, 11] -> [200, 150, 5]
+            #nn.BatchNorm(64, epsilon=1e-3, momentum=0.01),
+            nn.ReLU(),
+            nn.SubmConv3D(64, 64, 3),
+            #nn.BatchNorm(64, epsilon=1e-3, momentum=0.01),
+            nn.ReLU(),
+            nn.SubmConv3D(64, 64, 3),
+            #nn.BatchNorm(64, epsilon=1e-3, momentum=0.01),
+            nn.ReLU(),
+            nn.SubmConv3D(64, 64, 3), 
+            #nn.BatchNorm(64, epsilon=1e-3, momentum=0.01),
+            nn.ReLU(),
+            nn.Conv3D(64, 64, (3, 1, 1), (2, 1, 1)),  # [200, 150, 5] -> [200, 150, 2]
+            #nn.BatchNorm(64, epsilon=1e-3, momentum=0.01),
+            nn.ReLU(),
         )
         self.max_batch_size = 6
         # self.grid = torch.full([self.max_batch_size, *sparse_shape], -1, dtype=torch.int32).cuda()
 
         #for debug
-        for i in range(int(len(self.middle_conv)/2)):
-            weight = np.load("torch_middle_weight" + str(i) + ".npy")
-            self.middle_conv[i*2].weight.set_value(paddle.to_tensor(weight, stop_gradient=True))
+        if debug:
+            for i in range(int(len(self.middle_conv)/2)):
+                weight = np.load("torch_middle_weight" + str(i) + ".npy")
+                self.middle_conv[i*2].weight.set_value(paddle.to_tensor(weight, stop_gradient=True))
 
     def forward(self, voxel_features, coors, batch_size):
         shape = [batch_size] + list(self.sparse_shape) + [self.num_input_features]
@@ -138,7 +141,7 @@ def test():
         coors = paddle.concat(coors)
         print(coors.shape)
 
-        a = paddle.sparse.sparse_coo_tensor(coors, features, stop_gradient=False)
+        a = sparse.sparse_coo_tensor(coors, features, stop_gradient=False)
         np.save("features", a.values().numpy())
         np.save("coors", np.transpose(a.indices().numpy(), (1, 0)))
 
