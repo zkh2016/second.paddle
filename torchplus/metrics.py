@@ -73,7 +73,7 @@ class Accuracy(nn.Layer):
         total = paddle.cast(total, dtype='float32')
         self.count += num_examples
         self.total += total
-        print("total = ", self.total.numpy()[0], " count=", self.count.numpy()[0])
+        #print("total = ", self.total.numpy()[0], " count=", self.count.numpy()[0])
         return self.value.cpu()
         # return (total /  num_examples.data).cpu()
     @property

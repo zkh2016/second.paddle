@@ -8,7 +8,7 @@ class LRSchedulerStep(object):
         self.optimizer = fai_optimizer
         self.total_step = total_step
         self.lr_phases = []
-        print('lr: total_step = ', total_step, 'lr_phases:', lr_phases, 'mom_phases', mom_phases)
+        #print('lr: total_step = ', total_step, 'lr_phases:', lr_phases, 'mom_phases', mom_phases)
 
         for i, (start, lambda_func) in enumerate(lr_phases):
             if len(self.lr_phases) != 0:
@@ -54,7 +54,7 @@ class LRSchedulerStep(object):
                 self.optimizer.mom = func((step - start) / (end - start))
         if len(moms) > 0:
             self.optimizer.mom = moms[-1]
-        print("optimizer.mom=", self.optimizer.mom, "lr=", self.optimizer.lr)
+        #print("optimizer.mom=", self.optimizer.mom, "lr=", self.optimizer.lr)
 
     @property 
     def learning_rate(self):

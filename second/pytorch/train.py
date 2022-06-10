@@ -28,6 +28,7 @@ import psutil
 
 flag = 1
 debug = 0
+profiling=False
 
 def example_convert_to_torch(example, dtype=torch.float32,
                              device=None) -> dict:
@@ -165,7 +166,7 @@ def train(config_path,
           model_dir,
           result_path=None,
           create_folder=False,
-          display_step=1,
+          display_step=10,
           summary_step=5,
           pretrained_path=None,
           pretrained_include=None,
@@ -296,7 +297,7 @@ def train(config_path,
             dataset,
             batch_size=input_cfg.batch_size * num_gpu,
             shuffle=True,
-            num_workers=1,#input_cfg.preprocess.num_workers * num_gpu,
+            num_workers=input_cfg.preprocess.num_workers * num_gpu,
             pin_memory=False,
             #use_shared_memory=False,
             collate_fn=collate_fn,
@@ -377,9 +378,11 @@ def train(config_path,
                     example_paddle = example_convert_to_paddle(example, float_dtype)
 
                     batch_size = example_paddle["anchors"].shape[0]
-                    paddle.device.cuda.synchronize()
 
-                    t0 = time.time()
+                    if profiling:
+                        paddle.device.cuda.synchronize()
+                        t0 = time.time()
+
                     ret_dict = net_parallel(example_paddle)
                     cls_preds = ret_dict["cls_preds"]
                     loss = ret_dict["loss"].mean()
@@ -402,16 +405,20 @@ def train(config_path,
                         print("verify loss success...")
                         input_count += 1
 
-                    paddle.device.cuda.synchronize()
-                    t1 = time.time()
+                    if profiling:
+                        paddle.device.cuda.synchronize()
+                        t1 = time.time()
+
                     if train_cfg.enable_mixed_precision:
                         with amp.scale_loss(loss, amp_optimizer) as scaled_loss:
                             scaled_loss.backward()
                     else:
                         loss.backward()
-                    paddle.device.cuda.synchronize()
-                    t2 = time.time()
-                    print("forward time = ", t1-t0, "backward time = ", t2-t1)
+
+                    if profiling:
+                        paddle.device.cuda.synchronize()
+                        t2 = time.time()
+                        print("forward time = ", t1-t0, "backward time = ", t2-t1)
 
                     if flag == 0:
                         grad = net.rpn.conv_box.weight.grad.numpy()
@@ -442,9 +449,11 @@ def train(config_path,
                         middle_weight = net.middle_feature_extractor.middle_conv[0].weight.numpy()
                         assert np.allclose(torch_middle_weight, middle_weight, atol=1e-3, rtol=1e-3)
                         print("compare weight after opt success")
-                    paddle.device.cuda.synchronize()
-                    t3 = time.time()
-                    print("optmizer time = ", t3-t2)
+
+                    if profiling:
+                        paddle.device.cuda.synchronize()
+                        t3 = time.time()
+                        print("optmizer time = ", t3-t2)
                     net_metrics = net.update_metrics(cls_loss_reduced,
                                                      loc_loss_reduced, cls_preds,
                                                      labels, cared)

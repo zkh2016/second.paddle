@@ -4,7 +4,8 @@ import os
 import signal
 from pathlib import Path
 
-import torch
+#import torch
+import paddle
 
 
 class DelayedKeyboardInterrupt(object):
@@ -87,7 +88,8 @@ def save(model_dir,
             ckpt_info_dict['all_ckpts'][model_name] = [ckpt_filename]
         all_ckpts = ckpt_info_dict['all_ckpts'][model_name]
 
-        torch.save(model.state_dict(), ckpt_path)
+        print("ckpt_path:", ckpt_path)
+        paddle.save(model.state_dict(), ckpt_path)
         # check ckpt in all_ckpts is exist, if not, delete it from all_ckpts
         all_ckpts_checked = []
         for ckpt in all_ckpts:
@@ -114,7 +116,7 @@ def save(model_dir,
 def restore(ckpt_path, model, map_func=None):
     if not Path(ckpt_path).is_file():
         raise ValueError("checkpoint {} not exist.".format(ckpt_path))
-    state_dict = torch.load(ckpt_path)
+    state_dict = paddle.load(ckpt_path)
     if map_func is not None:
         map_func(state_dict)
     model.load_state_dict(state_dict)

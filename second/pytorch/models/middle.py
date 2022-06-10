@@ -102,15 +102,28 @@ class SpMiddleFHD(paddle.nn.Layer):
 
     def forward(self, voxel_features, coors, batch_size):
         shape = [batch_size] + list(self.sparse_shape) + [self.num_input_features]
+        #t00 = time.time()
         sp_x = sparse.sparse_coo_tensor(coors.transpose((1,0)), voxel_features, shape=shape, stop_gradient=False)
+        #paddle.device.cuda.synchronize()
+        #t0 = time.time()
+        #paddle.device.cuda.synchronize()
         out = self.middle_conv(sp_x)
+        #paddle.device.cuda.synchronize()
+        #t1 = time.time()
 
         #out = out.to_dense()
         out = sparse.sparse_coo_tensor(paddle.cast(out.indices(), 'int64'), out.values(), out.shape, stop_gradient=False)
+        #paddle.device.cuda.synchronize()
+        #t2 = time.time()
         out = out.to_dense()
+        #paddle.device.cuda.synchronize()
+        #t3 = time.time()
         out = paddle.transpose(out, perm=[0, 4, 1, 2, 3])
         N, C, D, H, W = out.shape
         out = paddle.reshape(out, shape=[N, C*D, H, W])
+        paddle.device.cuda.synchronize()
+        #t4 = time.time()
+        #print("middle forward time = ", t0-t00, t1-t0, t2-t1, t3-t2, t4-t3)
         return out
 
 from paddle.fluid.framework import _test_eager_guard

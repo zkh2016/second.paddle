@@ -182,7 +182,7 @@ class OptimWrapper(paddle.optimizer.Optimizer):
     def step(self) -> None:
         "Set weight decay and step optimizer."
         # weight decay outside of optimizer step (AdamW)
-        print("call OptimizerWrapper step..")
+        #print("call OptimizerWrapper step..")
         global param_count
         counts = []
         index = 0
@@ -190,7 +190,7 @@ class OptimWrapper(paddle.optimizer.Optimizer):
             for lr, wd, pg1, pg2 in zip(self._lr, self._wd,
                                         self.opt._param_groups[::2],
                                         self.opt._param_groups[1::2]):
-                print("opt step: wd = ", wd, " lr = ", lr, self._wd, len(pg1['params']))
+                #print("opt step: wd = ", wd, " lr = ", lr, self._wd, len(pg1['params']))
                 for p in pg1['params']:
                     #p.optimize_attr['learning_rate'] = lr
                     tmp = paddle.full(p.shape, 1-wd*lr)
@@ -302,16 +302,16 @@ class OptimWrapper(paddle.optimizer.Optimizer):
     #Hyperparameters as properties
     @property
     def lr(self) -> float:
-        print("call lr....")
+        #print("call lr....")
         #return self._lr[-1]
         return self.opt.get_lr()
 
     @lr.setter
     def lr(self, val: float) -> None:
-        print("call set_lr....")
+        #print("call set_lr....")
         self._lr = self.set_val('learning_rate', listify(val, self._lr))
         #self._lr = val
-        print('set lr = ', val)
+        #print('set lr = ', val)
         #self.opt._learning_rate = val
         if isinstance(val, float):
             self.opt.set_lr(val)
@@ -320,12 +320,12 @@ class OptimWrapper(paddle.optimizer.Optimizer):
 
     @property
     def mom(self) -> float:
-        print("call mom....")
+        #print("call mom....")
         return self._mom[-1]
 
     @mom.setter
     def mom(self, val: float) -> None:
-        print("call set mom....")
+        #print("call set mom....")
         if 'momentum' in self.opt_keys:
             print("set momentum...")
             self.set_val('momentum', listify(val, self._mom))

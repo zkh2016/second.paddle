@@ -17,6 +17,7 @@ from second.pytorch.utils import paddle_timer
 loss_flag=1
 input_count = 0
 debug = 0
+profiling=False
 
 def _get_pos_neg_loss(cls_loss, labels):
     # cls_loss: [N, num_anchors, num_class]
@@ -392,13 +393,15 @@ class VoxelNet(nn.Layer):
             atol=1e-5, rtol=1e-5)
             print("compare voxels " + str(input_count) + " success")
 
-        t0 = time.time()
+        if profiling:
+            t0 = time.time()
         voxel_features = self.voxel_feature_extractor(voxels, num_points,
                                                       coors)
 
-        paddle.device.cuda.synchronize()
-        t1 = time.time()
-        print("vfe time:", t1-t0)
+        if profiling:
+            paddle.device.cuda.synchronize()
+            t1 = time.time()
+            print("vfe time:", t1-t0)
 
         if debug:
             torch_voxel_features = np.load('./vfe/' + str(input_count) + '_voxel_features.npy')
@@ -409,11 +412,17 @@ class VoxelNet(nn.Layer):
         self.end_timer("voxel_feature_extractor")
 
         self.start_timer("middle forward")
-        t0 = time.time()
+
+        if profiling:
+            t0 = time.time()
+
         self.spatial_features = self.middle_feature_extractor(
             voxel_features, coors, batch_size)
-        paddle.device.cuda.synchronize()
-        t1 = time.time()
+
+        if profiling:
+            paddle.device.cuda.synchronize()
+            t1 = time.time()
+            print("middle time:", t1-t0)
 
         if debug:
             torch_spatial_features = np.load('./middle/' + str(input_count) + '_spatial_features.npy')
@@ -421,16 +430,17 @@ class VoxelNet(nn.Layer):
             rtol=1e-5)
             print("compared spatial_features " + str(input_count) + " success")
 
-        print("middle time:", t1-t0)
 
         self.end_timer("middle forward")
 
         self.start_timer("rpn forward")
-        t0 = time.time()
+        if profiling:
+            t0 = time.time()
         preds_dict = self.rpn(self.spatial_features)
-        paddle.device.cuda.synchronize()
-        t1 = time.time()
-        print("rpn time:", t1-t0)
+        if profiling:
+            paddle.device.cuda.synchronize()
+            t1 = time.time()
+            print("rpn time:", t1-t0)
 
         self.end_timer("rpn forward")
         #print("voxelnet forward out.shape=", preds_dict.shape)
@@ -478,7 +488,7 @@ class VoxelNet(nn.Layer):
         err_msg = f"num_anchors={batch_anchors.shape[1]}, but num_output={box_preds.shape[1]}. please check size"
         assert batch_anchors.shape[1] == box_preds.shape[1], err_msg
         if self.training:
-            print("is training...\n")
+            #print("is training...\n")
             return self.loss(example, preds_dict)
         else:
             self.start_timer("predict")
