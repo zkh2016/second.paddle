@@ -2,7 +2,7 @@ import paddle
 
 from second.core.box_coders import BevBoxCoder, GroundBox3dCoder
 #from second.pytorch.core import box_torch_ops
-from second.pytorch.core import box_paddle_ops_
+from second.pytorch.core import box_paddle_ops
 
 
 class GroundBox3dCoderTorch(GroundBox3dCoder):

@@ -74,7 +74,7 @@ def save(model_dir,
     # prevent save incomplete checkpoint due to key interrupt
     with DelayedKeyboardInterrupt():
         ckpt_info_path = Path(model_dir) / "checkpoints.json"
-        ckpt_filename = "{}-{}.tckpt".format(model_name, global_step)
+        ckpt_filename = "{}-{}.pdparams".format(model_name, global_step)
         ckpt_path = Path(model_dir) / ckpt_filename
         if not ckpt_info_path.is_file():
             ckpt_info_dict = {'latest_ckpt': {}, 'all_ckpts': {}}
@@ -88,8 +88,7 @@ def save(model_dir,
             ckpt_info_dict['all_ckpts'][model_name] = [ckpt_filename]
         all_ckpts = ckpt_info_dict['all_ckpts'][model_name]
 
-        print("ckpt_path:", ckpt_path)
-        paddle.save(model.state_dict(), ckpt_path)
+        paddle.save(model.state_dict(), str(ckpt_path))
         # check ckpt in all_ckpts is exist, if not, delete it from all_ckpts
         all_ckpts_checked = []
         for ckpt in all_ckpts:
