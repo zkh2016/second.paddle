@@ -359,7 +359,7 @@ def prep_pointcloud(input_dict,
     metrics["prep_time"] = time.time() - t
     if not training:
         return example
-    example["gt_names"] = gt_dict["gt_names"]
+    #example["gt_names"] = gt_dict["gt_names"]
     # voxel_labels = box_np_ops.assign_label_to_voxel(gt_boxes, coordinates,
     #                                                 voxel_size, coors_range)
     if create_targets:

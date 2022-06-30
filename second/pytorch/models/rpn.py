@@ -6,7 +6,6 @@ from paddle.nn import functional as F
 from .common import Sequential
 
 REGISTERED_RPN_CLASSES = {}
-debug = 0
 
 def register_rpn(cls, name=None):
     global REGISTERED_RPN_CLASSES
@@ -180,10 +179,6 @@ class RPN(paddle.nn.Layer):
         # print("rpn forward time", time.time() - t)
 
         return ret_dict
-
-flag = 1
-input_count = 0
-debug = 0
 
 class RPNNoHeadBase(nn.Layer):
     def __init__(self,
@@ -362,112 +357,10 @@ class RPNBase(RPNNoHeadBase):
             self.conv_dir_cls = nn.Conv2D(
                 final_num_filters, num_anchor_per_loc * num_direction_bins, 1)
 
-        #for debug
-        if debug:
-            for i in range(len(self.blocks)):
-                weight = np.load('torch_blocks' + str(i)+str(0)+'_weight.npy')
-                self.blocks[i][1].weight.set_value(paddle.to_tensor(weight, stop_gradient=False))
-                weight2 = np.load('torch_blocks' + str(i)+str(1)+'_weight.npy')
-                self.blocks[i][2].weight.set_value(paddle.to_tensor(weight2, stop_gradient=False))
-                bias = np.load('torch_blocks' + str(i)+str(1)+'_bias.npy')
-                self.blocks[i][2].bias.set_value(paddle.to_tensor(bias, stop_gradient=False))
-                for j in range(int((len(self.blocks[i]) - 4) / 3)):
-                    weight = np.load('torch_blocks' + str(i)+str(2+2*j+0)+'_weight.npy')
-                    weight2 = np.load('torch_blocks' + str(i)+str(2+2*j+1)+'_weight.npy')
-                    bias = np.load('torch_blocks' + str(i)+str(2+2*j+1)+'_bias.npy')
-                    self.blocks[i][4 + j*3].weight.set_value(paddle.to_tensor(weight, stop_gradient=False))
-                    self.blocks[i][4 + j*3+1].weight.set_value(paddle.to_tensor(weight2, stop_gradient=False))
-                    self.blocks[i][4 + j*3+1].bias.set_value(paddle.to_tensor(bias, stop_gradient=False))
-            for i in range(len(self.deblocks)):
-                for j in range(int(len(self.deblocks[i])/3)):
-                    weight = np.load('torch_deblocks' + str(i)+str(2*j)+'_weight.npy')
-                    weight2 = np.load('torch_deblocks' + str(i)+str(2*j+1)+'_weight.npy')
-                    bias = np.load('torch_deblocks' + str(i)+str(2*j+1)+'_bias.npy')
-                    self.deblocks[i][j*3].weight.set_value(paddle.to_tensor(weight, stop_gradient=False))
-                    self.deblocks[i][j*3+1].weight.set_value(paddle.to_tensor(weight2, stop_gradient=False))
-                    self.deblocks[i][j*3+1].bias.set_value(paddle.to_tensor(bias, stop_gradient=False))
-
-            conv_box_weight = np.load("torch_conv_box_weight.npy")
-            conv_box_bias = np.load("torch_conv_box_bias.npy")
-            conv_cls_weight = np.load("torch_conv_cls_weight.npy")
-            conv_cls_bias = np.load("torch_conv_cls_bias.npy")
-            self.conv_box.weight.set_value(paddle.to_tensor(conv_box_weight, stop_gradient=False))
-            self.conv_box.bias.set_value(paddle.to_tensor(conv_box_bias, stop_gradient=False))
-            self.conv_cls.weight.set_value(paddle.to_tensor(conv_cls_weight, stop_gradient=False))
-            self.conv_cls.bias.set_value(paddle.to_tensor(conv_cls_bias, stop_gradient=False))
-            if self._use_direction_classifier:
-                conv_dir_cls_weight = np.load("torch_conv_dir_cls_weight.npy")
-                conv_dir_cls_bias = np.load("torch_conv_dir_cls_bias.npy")
-                self.conv_dir_cls.weight.set_value(paddle.to_tensor(conv_dir_cls_weight, stop_gradient=False))
-                self.conv_dir_cls.bias.set_value(paddle.to_tensor(conv_dir_cls_bias, stop_gradient=False))
-
     def forward(self, x):
-        global flag
-        global input_count
-        #for debug
-        if debug:
-            base_dir = './rpn/' + str(input_count) + '_'
-            for i in range(len(self.blocks)):
-                weight = np.load(base_dir + 'torch_blocks' + str(i)+str(0)+'_weight.npy')
-                #self.blocks[i][1].weight.set_value(paddle.to_tensor(weight, stop_gradient=False))
-                assert np.allclose(weight,
-                self.blocks[i][1].weight.numpy(), atol=1e-3,
-                rtol=1e-3)
-                weight2 = np.load(base_dir + 'torch_blocks' + str(i)+str(1)+'_weight.npy')
-                #self.blocks[i][2].weight.set_value(paddle.to_tensor(weight2, stop_gradient=False))
-                assert np.allclose(weight2, self.blocks[i][2].weight.numpy(), atol=1e-3, rtol=1e-3)
-                bias = np.load(base_dir + 'torch_blocks' + str(i)+str(1)+'_bias.npy')
-                #self.blocks[i][2].bias.set_value(paddle.to_tensor(bias, stop_gradient=False))
-                assert np.allclose(bias, self.blocks[i][2].bias.numpy(), atol=1e-3, rtol=1e-3)
-                for j in range(int((len(self.blocks[i]) - 4) / 3)):
-                    weight = np.load(base_dir + 'torch_blocks' + str(i)+str(2+2*j+0)+'_weight.npy')
-                    weight2 = np.load(base_dir + 'torch_blocks' + str(i)+str(2+2*j+1)+'_weight.npy')
-                    bias = np.load(base_dir + 'torch_blocks' + str(i)+str(2+2*j+1)+'_bias.npy')
-                    #self.blocks[i][4 + j*3].weight.set_value(paddle.to_tensor(weight, stop_gradient=False))
-                    assert np.allclose(weight,
-                    self.blocks[i][4+j*3].weight.numpy(), atol=1e-3,
-                    rtol=1e-3)
-                    #self.blocks[i][4 + j*3+1].weight.set_value(paddle.to_tensor(weight2, stop_gradient=False))
-                    assert np.allclose(weight2, self.blocks[i][4+j*3+1].weight.numpy(), atol=1e-3, rtol=1e-3)
-                    #self.blocks[i][4 + j*3+1].bias.set_value(paddle.to_tensor(bias, stop_gradient=False))
-                    assert np.allclose(bias, self.blocks[i][4+j*3+1].bias.numpy(), atol=1e-3, rtol=1e-3)
-            for i in range(len(self.deblocks)):
-                for j in range(int(len(self.deblocks[i])/3)):
-                    weight = np.load(base_dir + 'torch_deblocks' + str(i)+str(2*j)+'_weight.npy')
-                    weight2 = np.load(base_dir + 'torch_deblocks' + str(i)+str(2*j+1)+'_weight.npy')
-                    bias = np.load(base_dir + 'torch_deblocks' + str(i)+str(2*j+1)+'_bias.npy')
-                    #self.deblocks[i][j*3].weight.set_value(paddle.to_tensor(weight, stop_gradient=False))
-                    assert np.allclose(weight,
-                    self.deblocks[i][j*3].weight.numpy(), atol=1e-3,
-                    rtol=1e-3)
-                    #self.deblocks[i][j*3+1].weight.set_value(paddle.to_tensor(weight2, stop_gradient=False))
-                    assert np.allclose(weight2, self.deblocks[i][j*3+1].weight.numpy(), atol=1e-3, rtol=1e-3)
-                    #self.deblocks[i][j*3+1].bias.set_value(paddle.to_tensor(bias, stop_gradient=False))
-                    assert np.allclose(bias, self.deblocks[i][j*3+1].bias.numpy(), atol=1e-3, rtol=1e-3)
-
-            conv_box_weight = np.load(base_dir + "torch_conv_box_weight.npy")
-            conv_box_bias = np.load(base_dir + "torch_conv_box_bias.npy")
-            conv_cls_weight = np.load(base_dir + "torch_conv_cls_weight.npy")
-            conv_cls_bias = np.load(base_dir + "torch_conv_cls_bias.npy")
-            self.conv_box.weight.set_value(paddle.to_tensor(conv_box_weight, stop_gradient=False))
-            self.conv_box.bias.set_value(paddle.to_tensor(conv_box_bias, stop_gradient=False))
-            self.conv_cls.weight.set_value(paddle.to_tensor(conv_cls_weight, stop_gradient=False))
-            self.conv_cls.bias.set_value(paddle.to_tensor(conv_cls_bias, stop_gradient=False))
-            if self._use_direction_classifier:
-                conv_dir_cls_weight = np.load(base_dir + "torch_conv_dir_cls_weight.npy")
-                conv_dir_cls_bias = np.load(base_dir + "torch_conv_dir_cls_bias.npy")
-                self.conv_dir_cls.weight.set_value(paddle.to_tensor(conv_dir_cls_weight, stop_gradient=False))
-                self.conv_dir_cls.bias.set_value(paddle.to_tensor(conv_dir_cls_bias, stop_gradient=False))
-
         res = super().forward(x)
         x = res["out"]
 
-        #if debug:
-            #torch_rpn_out = np.load('./rpn/' + str(input_count) + "_out.npy")
-            #assert np.allclose(torch_rpn_out, x.numpy(), atol=1e-1, rtol=1e-1)
-            #input_count += 1
-            #print("compare rpn_out success")
-        
 
         box_preds = self.conv_box(x)
         cls_preds = self.conv_cls(x)
@@ -486,14 +379,6 @@ class RPNBase(RPNNoHeadBase):
             "box_preds": box_preds,
             "cls_preds": cls_preds,
         }
-
-        if flag == 0:
-            torch_box_preds = np.load("torch_box_preds.npy")
-            torch_cls_preds = np.load("torch_cls_preds.npy")
-            assert np.allclose(torch_box_preds, box_preds.numpy(), atol=1e-5, rtol=1e-5)
-            assert np.allclose(torch_cls_preds, cls_preds.numpy(), atol=1e-5, rtol=1e-5)
-            print("compare box_preds and cls_preds success")
-            flag = 1
 
         if self._use_direction_classifier:
             dir_cls_preds = self.conv_dir_cls(x)

@@ -292,16 +292,16 @@ def train(config_path,
             voxel_generator=voxel_generator,
             target_assigner=target_assigner)
 
-        dataloader = torch.utils.data.DataLoader(
-        #dataloader = paddle.io.DataLoader(
+        #dataloader = torch.utils.data.DataLoader(
+        dataloader = paddle.io.DataLoader(
             dataset,
             batch_size=input_cfg.batch_size * num_gpu,
             shuffle=True,
             num_workers=input_cfg.preprocess.num_workers * num_gpu,
-            pin_memory=False,
-            #use_shared_memory=False,
+            #pin_memory=False,
+            use_shared_memory=False,
             collate_fn=collate_fn,
-            #worker_init_fn=_worker_init_fn,
+            worker_init_fn=_worker_init_fn,
             drop_last=not multi_gpu)
         eval_dataloader = torch.utils.data.DataLoader(
         #eval_dataloader = paddle.io.DataLoader(

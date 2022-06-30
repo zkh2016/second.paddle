@@ -2,7 +2,7 @@ import pathlib
 import pickle
 import time
 from functools import partial
-import paddle
+#import paddle
 
 import numpy as np
 
