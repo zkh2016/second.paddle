@@ -22,8 +22,8 @@ Detection configuration framework, they should define their own builder function
 that wraps the build function.
 """
 
-from torch.utils.data import Dataset
-#from paddle.io import Dataset
+#from torch.utils.data import Dataset
+from paddle.io import Dataset
 
 from second.builder import dataset_builder
 from second.protos import input_reader_pb2
