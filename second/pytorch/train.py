@@ -166,7 +166,7 @@ def train(config_path,
           model_dir,
           result_path=None,
           create_folder=False,
-          display_step=10,
+          display_step=50,
           summary_step=5,
           pretrained_path=None,
           pretrained_include=None,
@@ -322,7 +322,7 @@ def train(config_path,
         start_step = net.get_global_step()
         total_step = train_cfg.steps
         t = time.time()
-        steps_per_eval = train_cfg.steps_per_eval
+        steps_per_eval = 50#train_cfg.steps_per_eval
         clear_metrics_every_epoch = train_cfg.clear_metrics_every_epoch
 
         amp_optimizer.zero_grad()
@@ -525,7 +525,8 @@ def train(config_path,
                         prog_bar.start((len(eval_dataset) + eval_input_cfg.batch_size - 1)
                                     // eval_input_cfg.batch_size)
                         for example in iter(eval_dataloader):
-                            example = example_convert_to_torch(example, float_dtype)
+                            #example = example_convert_to_torch(example, float_dtype)
+                            example = example_convert_to_paddle(example, float_dtype)
                             detections += net(example)
                             prog_bar.print_bar()
 
@@ -646,9 +647,10 @@ def evaluate(config_path,
             prep_times.append(time.time() - t2)
             torch.cuda.synchronize()
             t1 = time.time()
-        example = example_convert_to_torch(example, float_dtype)
+        #example = example_convert_to_torch(example, float_dtype)
+        example = example_convert_to_paddle(example, float_dtype)
         if measure_time:
-            torch.cuda.synchronize()
+            paddle.device.cuda.synchronize()
             prep_example_times.append(time.time() - t1)
         with torch.no_grad():
             detections += net(example)

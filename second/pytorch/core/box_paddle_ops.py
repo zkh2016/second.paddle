@@ -7,8 +7,7 @@ from paddle import stack as tstack
 
 import torchplus
 from torchplus.tools import paddle_to_np_dtype
-from second.core.non_max_suppression.nms_gpu import (nms_gpu_cc, rotate_iou_gpu,
-                                                       rotate_nms_gpu)
+from second.core.non_max_suppression.nms_gpu import (nms_gpu_cc)
 from second.core.non_max_suppression.nms_cpu import rotate_nms_cc
 import spconv
 
@@ -21,11 +20,11 @@ def second_box_encode(boxes, anchors, encode_angle_to_vector=False, smooth_dim=F
     box_ndim = anchors.shape[-1]
     cas, cgs = [], []
     if box_ndim > 7:
-        xa, ya, za, wa, la, ha, ra, *cas = paddle.split(anchors, 1, axis=-1)
-        xg, yg, zg, wg, lg, hg, rg, *cgs = paddle.split(boxes, 1, axis=-1)
+        xa, ya, za, wa, la, ha, ra, *cas = paddle.split(anchors, 8, axis=-1)
+        xg, yg, zg, wg, lg, hg, rg, *cgs = paddle.split(boxes, 8, axis=-1)
     else:
-        xa, ya, za, wa, la, ha, ra = paddle.split(anchors, 1, axis=-1)
-        xg, yg, zg, wg, lg, hg, rg = paddle.split(boxes, 1, axis=-1)
+        xa, ya, za, wa, la, ha, ra = paddle.split(anchors, 7, axis=-1)
+        xg, yg, zg, wg, lg, hg, rg = paddle.split(boxes, 7, axis=-1)
 
     diagonal = paddle.sqrt(la**2 + wa**2)
     xt = (xg - xa) / diagonal
@@ -62,19 +61,19 @@ def second_box_decode(box_encodings, anchors, encode_angle_to_vector=False, smoo
     box_ndim = anchors.shape[-1]
     cas, cts = [], []
     if box_ndim > 7:
-        xa, ya, za, wa, la, ha, ra, *cas = paddle.split(anchors, 1, axis=-1)
+        xa, ya, za, wa, la, ha, ra, *cas = paddle.split(anchors, 8, axis=-1)
         if encode_angle_to_vector:
             xt, yt, zt, wt, lt, ht, rtx, rty, *cts = paddle.split(
-                box_encodings, 1, axis=-1)
+                box_encodings, 9, axis=-1)
         else:
-            xt, yt, zt, wt, lt, ht, rt, *cts = paddle.split(box_encodings, 1, axis=-1)
+            xt, yt, zt, wt, lt, ht, rt, *cts = paddle.split(box_encodings, 8, axis=-1)
     else:
-        xa, ya, za, wa, la, ha, ra = paddle.split(anchors, 1, axis=-1)
+        xa, ya, za, wa, la, ha, ra = paddle.split(anchors, 7, axis=-1)
         if encode_angle_to_vector:
             xt, yt, zt, wt, lt, ht, rtx, rty = paddle.split(
-                box_encodings, 1, axis=-1)
+                box_encodings, 8, axis=-1)
         else:
-            xt, yt, zt, wt, lt, ht, rt = paddle.split(box_encodings, 1, axis=-1)
+            xt, yt, zt, wt, lt, ht, rt = paddle.split(box_encodings, 7, axis=-1)
 
     # za = za + ha / 2
     # xt, yt, zt, wt, lt, ht, rt = torch.split(box_encodings, 1, dim=-1)
@@ -107,8 +106,8 @@ def bev_box_encode(boxes, anchors, encode_angle_to_vector=False, smooth_dim=Fals
         boxes ([N, 7] Tensor): normal boxes: x, y, z, l, w, h, r
         anchors ([N, 7] Tensor): anchors
     """
-    xa, ya, wa, la, ra = paddle.split(anchors, 1, axis=-1)
-    xg, yg, wg, lg, rg = paddle.split(boxes, 1, axis=-1)
+    xa, ya, wa, la, ra = paddle.split(anchors, 5, axis=-1)
+    xg, yg, wg, lg, rg = paddle.split(boxes, 5, axis=-1)
     diagonal = paddle.sqrt(la**2 + wa**2)
     xt = (xg - xa) / diagonal
     yt = (yg - ya) / diagonal
@@ -140,13 +139,13 @@ def bev_box_decode(box_encodings, anchors, encode_angle_to_vector=False, smooth_
         boxes ([N, 7] Tensor): normal boxes: x, y, z, w, l, h, r
         anchors ([N, 7] Tensor): anchors
     """
-    xa, ya, wa, la, ra = paddle.split(anchors, 1, axis=-1)
+    xa, ya, wa, la, ra = paddle.split(anchors, 5, axis=-1)
     if encode_angle_to_vector:
         xt, yt, wt, lt, rtx, rty = paddle.split(
-            box_encodings, 1, axis=-1)
+            box_encodings, 6, axis=-1)
 
     else:
-        xt, yt, wt, lt, rt = paddle.split(box_encodings, 1, axis=-1)
+        xt, yt, wt, lt, rt = paddle.split(box_encodings, 5, axis=-1)
 
     # xt, yt, zt, wt, lt, ht, rt = torch.split(box_encodings, 1, dim=-1)
     diagonal = paddle.sqrt(la**2 + wa**2)
@@ -464,7 +463,7 @@ def nms(bboxes,
         scores, indices = paddle.topk(scores, k=pre_max_size)
         bboxes = bboxes[indices]
     dets = paddle.concat([bboxes, scores.unsqueeze(-1)], axis=1)
-    dets_np = dets.data.numpy()
+    dets_np = dets.numpy()
     if len(dets_np) == 0:
         keep = np.array([], dtype=np.int64)
     else:
@@ -478,17 +477,17 @@ def nms(bboxes,
     else:
         return paddle.to_tensor(keep, dtype='int64')
 
-def nms_v2(bboxes,
-        scores,
-        pre_max_size=None,
-        post_max_size=None,
-        iou_threshold=0.5):
-    if pre_max_size is None:
-        pre_max_size = -1
-    if post_max_size is None:
-        post_max_size = -1
-    res = spconv.ops.nms(bboxes.cpu(), scores.cpu(), pre_max_size, post_max_size, iou_threshold, 1.0)
-    return res.to(bboxes.device)
+#def nms_v2(bboxes,
+#        scores,
+#        pre_max_size=None,
+#        post_max_size=None,
+#        iou_threshold=0.5):
+#    if pre_max_size is None:
+#        pre_max_size = -1
+#    if post_max_size is None:
+#        post_max_size = -1
+#    res = spconv.ops.nms(bboxes.cpu(), scores.cpu(), pre_max_size, post_max_size, iou_threshold, 1.0)
+#    return res.to(bboxes.device)
 
 
 def rotate_nms(rbboxes,
@@ -502,7 +501,7 @@ def rotate_nms(rbboxes,
         scores, indices = paddle.topk(scores, k=pre_max_size)
         rbboxes = rbboxes[indices]
     dets = paddle.concat([rbboxes, scores.unsqueeze(-1)], axis=1)
-    dets_np = dets.data.numpy()
+    dets_np = dets.numpy()
     if len(dets_np) == 0:
         keep = np.array([], dtype=np.int64)
     else:

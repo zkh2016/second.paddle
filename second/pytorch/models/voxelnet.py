@@ -3,6 +3,7 @@ import contextlib
 import paddle
 import time
 from paddle import nn
+import paddle.nn.functional as F
 from enum import Enum
 import torchplus
 from second.pytorch.core import box_paddle_ops
@@ -554,20 +555,22 @@ class VoxelNet(nn.Layer):
             if a_mask is not None:
                 box_preds = box_preds[a_mask]
                 cls_preds = cls_preds[a_mask]
-            box_preds = box_preds.float()
-            cls_preds = cls_preds.float()
+            #box_preds = box_preds.float()
+            box_preds = paddle.cast(box_preds, dtype='float32')
+            #cls_preds = cls_preds.float()
+            cls_preds = paddle.cast(cls_preds, dtype='float32')
             if self._use_direction_classifier:
                 if a_mask is not None:
                     dir_preds = dir_preds[a_mask]
-                dir_labels = paddle.max(dir_preds, axis=-1)[1]
+                dir_labels = paddle.argmax(dir_preds, axis=-1)
             if self._encode_background_as_zeros:
                 # this don't support softmax
                 assert self._use_sigmoid_score is True
-                total_scores = paddle.sigmoid(cls_preds)
+                total_scores = F.sigmoid(cls_preds)
             else:
                 # encode background as first element in one-hot vector
                 if self._use_sigmoid_score:
-                    total_scores = paddle.sigmoid(cls_preds)[..., 1:]
+                    total_scores = F.sigmoid(cls_preds)[..., 1:]
                 else:
                     total_scores = F.softmax(cls_preds, dim=-1)[..., 1:]
             # Apply NMS in birdeye view
@@ -605,7 +608,7 @@ class VoxelNet(nn.Layer):
                         class_scores = total_scores.reshape((
                             feature_map_size_prod, -1,
                             self._num_class))[..., class_idx]
-                        class_scores = class_scores.contiguous().reshape((-1))
+                        class_scores = class_scores.reshape((-1))
                         class_boxes_nms = boxes.reshape((-1,
                                                      boxes_for_nms.shape[-1]))
                         class_boxes = box_preds
@@ -618,7 +621,7 @@ class VoxelNet(nn.Layer):
                         class_boxes_nms = boxes.reshape((-1,
                             boxes_for_nms.shape[-1]))[anchors_range[0]:anchors_range[1], :]
                         class_scores = class_scores.contiguous().reshape((-1))
-                        class_boxes_nms = class_boxes_nms.contiguous().reshape((
+                        class_boxes_nms = class_boxes_nms.reshape((
                             -1, boxes_for_nms.shape[-1]))
                         class_boxes = box_preds.reshape((-1,
                             box_preds.shape[-1]))[anchors_range[0]:anchors_range[1], :]
@@ -670,9 +673,8 @@ class VoxelNet(nn.Layer):
                 # to remove overlapped box.
                 if num_class_with_bg == 1:
                     top_scores = total_scores.squeeze(-1)
-                    top_labels = paddle.zeros(
-                        total_scores.shape[0],
-                        dtype='int64')
+                    shape = [total_scores.shape[0]]
+                    top_labels = paddle.zeros(shape, dtype='int64')
                 else:
                     top_scores, top_labels = paddle.max(
                         total_scores, axis=-1)
@@ -686,7 +688,8 @@ class VoxelNet(nn.Layer):
                         if self._use_direction_classifier:
                             dir_labels = dir_labels[top_scores_keep]
                         top_labels = top_labels[top_scores_keep]
-                    boxes_for_nms = box_preds[:, [0, 1, 3, 4, 6]]
+                    #boxes_for_nms = box_preds[:, [0, 1, 3, 4, 6]]
+                    boxes_for_nms = paddle.index_select(box_preds, axis=len(box_preds.shape)-1, index=paddle.to_tensor([0, 1, 3, 4, 6]))
                     if not self._use_rotate_nms:
                         box_preds_corners = box_paddle_ops.center_to_corner_box2d(
                             boxes_for_nms[:, :2], boxes_for_nms[:, 2:4],
@@ -720,10 +723,10 @@ class VoxelNet(nn.Layer):
                     dir_rot = box_paddle_ops.limit_period(
                         box_preds[..., 6] - self._dir_offset,
                         self._dir_limit_offset, period)
+                    tmp = dir_rot + self._dir_offset + period * dir_labels#.to(box_preds.dtype)
                     box_preds[
                         ...,
-                        6] = dir_rot + self._dir_offset + period * dir_labels.to(
-                            box_preds.dtype)
+                        6] = paddle.cast(tmp, dtype=box_preds.dtype)
                 final_box_preds = box_preds
                 final_scores = scores
                 final_labels = label_preds
