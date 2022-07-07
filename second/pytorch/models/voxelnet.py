@@ -161,9 +161,6 @@ class VoxelNet(nn.Layer):
             num_input_features=middle_num_input_features,
             num_filters_down1=middle_num_filters_d1,
             num_filters_down2=middle_num_filters_d2)
-        print("middle:")
-        print(self.middle_feature_extractor)
-        print(len(self.middle_feature_extractor.parameters()))
         self.rpn = rpn.get_rpn_class(rpn_class_name)(
             use_norm=True,
             num_class=num_class,
@@ -180,9 +177,6 @@ class VoxelNet(nn.Layer):
             num_groups=num_groups,
             box_code_size=target_assigner.box_coder.code_size,
             num_direction_bins=self._num_direction_bins)
-        print("rpn:")
-        print(self.rpn)
-        print(len(self.rpn.parameters()))
         self.rpn_acc = metrics.Accuracy(
             dim=-1, encode_background_as_zeros=encode_background_as_zeros)
         self.rpn_precision = metrics.Precision(dim=-1)
@@ -265,35 +259,12 @@ class VoxelNet(nn.Layer):
         self.start_timer("prepare weight forward")
 
         global loss_flag
-        if loss_flag == 0:
-            torch_labels = np.load("torch_labels.npy")
-            if np.allclose(torch_labels, labels.numpy()) is False:
-                print("compare labels failed...")
-                labels = paddle.to_tensor(torch_labels)
-            torch_reg_targets = np.load("torch_reg_targets.npy")
-            if np.allclose(torch_reg_targets, reg_targets.numpy()) is False:
-                print("compare reg_targets failed...")
-                reg_targets = paddle.to_tensor(torch_reg_targets)
-            torch_importance = np.load("torch_importance.npy")
-            if np.allclose(torch_importance, importance.numpy()) is False:
-                print("compare importance failed...")
-                importance = paddle.to_tensor(torch_importance)
-
         cls_weights, reg_weights, cared = prepare_loss_weights(
             labels,
             pos_cls_weight=self._pos_cls_weight,
             neg_cls_weight=self._neg_cls_weight,
             loss_norm_type=self._loss_norm_type,
             dtype=box_preds.dtype)
-
-        if loss_flag == 0:
-            torch_cls_weights = np.load("torch_cls_weights.npy")
-            assert np.allclose(torch_cls_weights, cls_weights.numpy(), atol=1e-5, rtol=1e-5)
-            torch_reg_weights = np.load("torch_reg_weights.npy")
-            assert np.allclose(torch_reg_weights, reg_weights.numpy(), atol=1e-5, rtol=1e-5)
-            torch_cared_weight = np.load("torch_cared_weights.npy")
-            assert np.allclose(torch_cared_weight, cared.numpy(), atol=1e-5, rtol=1e-5)
-            print("compared loss weight success")
 
         cls_targets = paddle.cast(labels * cared, labels.dtype)
         cls_targets = cls_targets.unsqueeze(-1)
@@ -353,23 +324,6 @@ class VoxelNet(nn.Layer):
         if self._use_direction_classifier:
             res["dir_loss_reduced"] = dir_loss
 
-        if loss_flag == 0:
-            loss_flag = 1
-            torch_cls_loss = np.load("torch_cls_loss.npy")
-            assert np.allclose(torch_cls_loss, cls_loss.numpy(), atol=1e-5, rtol=1e-5)
-            torch_loc_loss = np.load("torch_loc_loss.npy")
-            assert np.allclose(torch_loc_loss, loc_loss.numpy(), atol=1e-2, rtol=1e-2)
-            torch_cls_pos_loss = np.load("torch_cls_pos_loss.npy")
-            assert np.allclose(torch_cls_pos_loss, cls_pos_loss.numpy(), atol=1e-2, rtol=1e-2)
-            torch_cls_neg_loss = np.load("torch_cls_neg_loss.npy")
-            assert np.allclose(torch_cls_neg_loss, cls_neg_loss.numpy(), atol=1e-2, rtol=1e-2)
-            torch_loss = np.load("torch_loss.npy")
-            assert np.allclose(torch_loss, loss.numpy(), atol=1e-2, rtol=1e-2)
-            torch_cls_loss_reduced = np.load("torch_cls_loss_reduced.npy")
-            assert np.allclose(torch_cls_loss_reduced, cls_loss_reduced.numpy(), atol=1e-2, rtol=1e-2)
-            torch_loc_loss_reduced = np.load("torch_loc_loss_reduced.npy")
-            assert np.allclose(torch_loc_loss_reduced, loc_loss_reduced.numpy(), atol=1e-5, rtol=1e-5)
-            print("compare loss success")
         return res
 
     def network_forward(self, voxels, num_points, coors, batch_size):
@@ -384,78 +338,23 @@ class VoxelNet(nn.Layer):
             }
         """
         self.start_timer("voxel_feature_extractor")
-        global flag
-        global input_count
-        voxels.stop_gradient=False
 
-        if debug:
-            torch_voxels = np.load('./voxel/' + str(input_count) + '_voxels.npy')
-            assert np.allclose(torch_voxels, voxels.numpy(),
-            atol=1e-5, rtol=1e-5)
-            print("compare voxels " + str(input_count) + " success")
-
-        if profiling:
-            t0 = time.time()
         voxel_features = self.voxel_feature_extractor(voxels, num_points,
                                                       coors)
-
-        if profiling:
-            paddle.device.cuda.synchronize()
-            t1 = time.time()
-            print("vfe time:", t1-t0)
-
-        if debug:
-            torch_voxel_features = np.load('./vfe/' + str(input_count) + '_voxel_features.npy')
-            assert np.allclose(torch_voxel_features,
-            voxel_features.numpy(), atol=1e-5, rtol=1e-5)
-            print("compared voxel_features " + str(input_count) + " success")
-
         self.end_timer("voxel_feature_extractor")
 
         self.start_timer("middle forward")
 
-        if profiling:
-            t0 = time.time()
-
         self.spatial_features = self.middle_feature_extractor(
             voxel_features, coors, batch_size)
-
-        if profiling:
-            paddle.device.cuda.synchronize()
-            t1 = time.time()
-            print("middle time:", t1-t0)
-
-        if debug:
-            torch_spatial_features = np.load('./middle/' + str(input_count) + '_spatial_features.npy')
-            assert np.allclose(torch_spatial_features, self.spatial_features.numpy(), atol=1e-5,
-            rtol=1e-5)
-            print("compared spatial_features " + str(input_count) + " success")
-
 
         self.end_timer("middle forward")
 
         self.start_timer("rpn forward")
-        if profiling:
-            t0 = time.time()
         preds_dict = self.rpn(self.spatial_features)
-        if profiling:
-            paddle.device.cuda.synchronize()
-            t1 = time.time()
-            print("rpn time:", t1-t0)
 
         self.end_timer("rpn forward")
-        #print("voxelnet forward out.shape=", preds_dict.shape)
 
-        if debug:
-            #torch_box_preds = np.load('./rpn/' + str(input_count) + '_box_preds.npy')
-            #assert np.allclose(torch_box_preds, preds_dict['box_preds'].numpy(), atol=1e-1, rtol=1e-1)
-            #print("compared box_preds " + str(input_count) + " success")
-            torch_cls_preds = np.load('./rpn/' + str(input_count) + '_cls_preds.npy')
-            assert np.allclose(torch_cls_preds,
-            preds_dict['cls_preds'].numpy(), atol=1e-3,
-            rtol=1e-3)
-            print("compared cls_preds " + str(input_count) + " success")
-            input_count += 1
         return preds_dict
 
     def forward(self, example):
