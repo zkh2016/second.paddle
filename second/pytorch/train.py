@@ -256,18 +256,19 @@ def train(config_path,
             loss_scale=loss_scale)
         if loss_scale < 0:
             loss_scale = "dynamic"
-        if train_cfg.enable_mixed_precision:
-            max_num_voxels = input_cfg.preprocess.max_number_of_voxels * input_cfg.batch_size
-            assert max_num_voxels < 65535, "spconv fp16 training only support this"
-            from apex import amp
-            net, amp_optimizer = amp.initialize(net, fastai_optimizer,
-                                            opt_level="O2",
-                                            keep_batchnorm_fp32=True,
-                                            loss_scale=loss_scale
-                                            )
-            net.metrics_to_float()
-        else:
-            amp_optimizer = fastai_optimizer
+        #if train_cfg.enable_mixed_precision:
+        #    max_num_voxels = input_cfg.preprocess.max_number_of_voxels * input_cfg.batch_size
+        #    assert max_num_voxels < 65535, "spconv fp16 training only support this"
+        #    from apex import amp
+        #    net, amp_optimizer = amp.initialize(net, fastai_optimizer,
+        #                                    opt_level="O2",
+        #                                    keep_batchnorm_fp32=True,
+        #                                    loss_scale=loss_scale
+        #                                    )
+        #    net.metrics_to_float()
+        #else:
+        #    amp_optimizer = fastai_optimizer
+        amp_optimizer = fastai_optimizer
         #torchplus.train.try_restore_latest_checkpoints(model_dir,
         #                                               [fastai_optimizer])
         lr_scheduler = lr_scheduler_builder.build(optimizer_cfg, amp_optimizer,
@@ -338,17 +339,17 @@ def train(config_path,
         clear_metrics_every_epoch = train_cfg.clear_metrics_every_epoch
 
         amp_optimizer.zero_grad()
+        scaler = paddle.amp.GradScaler(init_loss_scaling=1024)
         step_times = []
         step = start_step
         total_time = 0
         profiling_step = 0
-        #p = profiler.Profiler(timer_only=True)
+        p = profiler.Profiler(timer_only=True)
         try:
             while True:
                 if clear_metrics_every_epoch:
                     net.clear_metrics()
-                input_count = 0
-                #p.start()
+                p.start()
                 local_step = 0
                 for example in dataloader:
                     lr_scheduler.step(net.get_global_step())
@@ -360,7 +361,9 @@ def train(config_path,
 
                     batch_size = example_paddle["anchors"].shape[0]
 
-                    ret_dict = net_parallel(example_paddle)
+                    with paddle.amp.auto_cast(custom_white_list={'conv3d_coo'}, level='O1'):
+                        ret_dict = net_parallel(example_paddle)
+
                     cls_preds = ret_dict["cls_preds"]
                     loss = ret_dict["loss"].mean()
                     cls_loss_reduced = ret_dict["cls_loss_reduced"].mean()
@@ -374,13 +377,18 @@ def train(config_path,
                     labels = example_paddle["labels"]
 
                     if train_cfg.enable_mixed_precision:
-                        with amp.scale_loss(loss, amp_optimizer) as scaled_loss:
-                            scaled_loss.backward()
+                        #with amp.scale_loss(loss, amp_optimizer) as scaled_loss:
+                        #    scaled_loss.backward()
+                        scaled = scaler.scale(loss)
+                        scaled.backward()
+                        scaler.step(amp_optimizer.opt)
+                        scaler.update()
+                        amp_optimizer.zero_grad(False)
                     else:
                         loss.backward()
+                        amp_optimizer.step()
+                        amp_optimizer.zero_grad()
 
-                    amp_optimizer.step()
-                    amp_optimizer.zero_grad()
                     net.update_global_step()
                     local_step += 1
 
@@ -403,12 +411,11 @@ def train(config_path,
                     else:
                         num_anchors = int(example_paddle['anchors_mask'][0].sum())
                     global_step = net.get_global_step()
-                    #p.step(num_samples=batch_size)
-
+                    p.step(num_samples=batch_size)
 
                     if global_step % display_step == 0:
-                        #step_info = p.step_info()
-                        #print("step {}: {}".format(global_step, step_info))
+                        step_info = p.step_info()
+                        print("step {}: {}".format(global_step, step_info))
                         if measure_time:
                             for name, val in net.get_avg_time_dict().items():
                                 print(f"avg {name} time = {val * 1000:.3f} ms")

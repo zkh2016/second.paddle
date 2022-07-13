@@ -250,10 +250,10 @@ class OptimWrapper(paddle.optimizer.Optimizer):
                         param_count += 1
                         index += 1
 
-    def zero_grad(self) -> None:
+    def zero_grad(self, set_to_zero=True) -> None:
         "Clear optimizer gradients."
         #self.opt.zero_grad()
-        self.opt.clear_grad()
+        self.opt.clear_grad(set_to_zero=set_to_zero)
 
     #Passthrough to the inner opt.
     def __getstate__(self):
